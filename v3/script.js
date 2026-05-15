@@ -69,7 +69,9 @@ let fistLoadData = [];
 
 let lastViewedAt = null;
 let unreadDividerInserted = false;
+let unreadCount = 0;
 const STORAGE_KEY_PREFIX = 'clotus_wa_lastview_';
+const POLL_INTERVAL_MS = 10000;
 
 let threadSearchMatches = [];
 let threadSearchActiveIdx = -1;
@@ -191,6 +193,42 @@ function refreshAllRelativeTimes() {
 }
 
 /* ============================================================
+   UNREAD BADGE
+   ============================================================ */
+function refreshUnreadBadge() {
+  if (!refreshBtnEl) return;
+  if (unreadCount > 0) {
+    refreshBtnEl.classList.add('has-unread');
+    refreshBtnEl.setAttribute('title', `${unreadCount} new message${unreadCount > 1 ? 's' : ''} — click to scroll`);
+    let span = refreshBtnEl.querySelector('.unread-count');
+    if (!span) {
+      span = document.createElement('span');
+      span.className = 'unread-count';
+      refreshBtnEl.appendChild(span);
+    }
+    span.textContent = unreadCount > 9 ? '9+' : String(unreadCount);
+  } else {
+    refreshBtnEl.classList.remove('has-unread');
+    refreshBtnEl.setAttribute('title', 'Refresh');
+    const span = refreshBtnEl.querySelector('.unread-count');
+    if (span) span.remove();
+  }
+}
+
+function clearUnreadState() {
+  unreadCount = 0;
+  document.querySelectorAll('.bot-message.unread').forEach(el => el.classList.remove('unread'));
+  document.querySelectorAll('.unread-divider').forEach(el => el.remove());
+  refreshUnreadBadge();
+  if (listofdata?.EntityId) {
+    lastViewedAt = Date.now();
+    try {
+      localStorage.setItem(STORAGE_KEY_PREFIX + listofdata.EntityId, String(lastViewedAt));
+    } catch (e) {}
+  }
+}
+
+/* ============================================================
    MIME / FILE TYPE DETECTION (kept from v0)
    ============================================================ */
 async function getMimeTypeFromBuffer(bufferData) {
@@ -288,6 +326,15 @@ function getFileIcon(mimeType, fileName) {
   return '<i class="fas fa-file fa-2x"></i>';
 }
 
+function getDocClass(mimeType, fileName) {
+  const extension = (fileName || '').split('.').pop().toLowerCase();
+  if (mimeType === 'application/pdf' || extension === 'pdf') return 'is-pdf';
+  if ((mimeType || '').includes('word') || ['doc', 'docx'].includes(extension)) return 'is-docx';
+  if ((mimeType || '').includes('excel') || ['xls', 'xlsx'].includes(extension)) return 'is-xlsx';
+  if ((mimeType || '').includes('powerpoint') || ['ppt', 'pptx'].includes(extension)) return 'is-pptx';
+  return '';
+}
+
 function formatFileSize(bytes) {
   if (bytes === 0) return '0 Bytes';
   const k = 1024;
@@ -378,11 +425,14 @@ async function dispalyFileToChat(bufferData, sender, msgTime, timeGroup, item = 
       break;
 
     default: {
-      const icon = getFileIcon(mimeFileType, fileName);
+      const docClass = getDocClass(mimeFileType, fileName);
+      const innerIcon = docClass
+        ? `<i class="fas fa-file-${docClass.replace('is-', '') === 'pdf' ? 'pdf' : docClass.replace('is-', '').replace('xlsx', 'excel').replace('docx', 'word').replace('pptx', 'powerpoint')}"></i>`
+        : getFileIcon(mimeFileType, fileName);
       messageContent = `
         <div class="file-message-container">
           <div class="file-message document-message">
-            <div class="document-icon">${icon}</div>
+            <div class="document-icon ${docClass}">${innerIcon}</div>
             <div class="document-info">
               <span class="file-name">${safeName}</span>
               <span class="file-size">${fileSize}</span>
@@ -468,11 +518,14 @@ async function handleFileUpload(event) {
           </div>`;
         break;
       default: {
-        const icon = getFileIcon(fileType, fileName);
+        const docClass = getDocClass(fileType, fileName);
+        const innerIcon = docClass
+          ? `<i class="fas fa-file-${docClass.replace('is-', '') === 'pdf' ? 'pdf' : docClass.replace('is-', '').replace('xlsx', 'excel').replace('docx', 'word').replace('pptx', 'powerpoint')}"></i>`
+          : getFileIcon(fileType, fileName);
         messageContent = `
           <div class="file-message-container">
             <div class="file-message document-message">
-              <div class="document-icon">${icon}</div>
+              <div class="document-icon ${docClass}">${innerIcon}</div>
               <div class="document-info">
                 <span class="file-name">${safeName}</span>
                 <span class="file-size">${fileSize}</span>
@@ -498,7 +551,7 @@ async function handleFileUpload(event) {
       console.error('File upload chain failed', err);
     }
 
-    timerInterval = setInterval(() => { loadAllMessages(listofdata); }, 30000);
+    timerInterval = setInterval(() => { loadAllMessages(listofdata); }, POLL_INTERVAL_MS);
     event.target.value = '';
   };
   reader.readAsDataURL(file);
@@ -575,7 +628,7 @@ async function sendMessage() {
     console.error("Failed to send to backend:", error);
   }
 
-  timerInterval = setInterval(() => { loadAllMessages(listofdata); }, 30000);
+  timerInterval = setInterval(() => { loadAllMessages(listofdata); }, POLL_INTERVAL_MS);
 }
 
 userInput.addEventListener('keypress', function (event) {
@@ -662,6 +715,8 @@ async function appendMessage(text, sender, msgTime, group = 'normal-group', file
     const msgT = new Date(msgTime).getTime();
     if (msgT > lastViewedAt) {
       messageDiv.classList.add('unread');
+      unreadCount++;
+      refreshUnreadBadge();
     }
   }
 
@@ -1113,6 +1168,21 @@ searchNextEl?.addEventListener('click', nextThreadMatch);
 
 refreshBtnEl?.addEventListener('click', async () => {
   refreshBtnEl.disabled = true;
+
+  // If there are unread messages, scroll to them and clear state
+  if (unreadCount > 0) {
+    const firstUnread = chatBody.querySelector('.bot-message.unread');
+    if (firstUnread) {
+      firstUnread.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    setTimeout(() => {
+      clearUnreadState();
+      refreshBtnEl.disabled = false;
+    }, 800);
+    return;
+  }
+
+  // Otherwise: standard refresh
   refreshBtnEl.style.opacity = '0.5';
   try {
     await loadAllMessages(listofdata);
@@ -1122,6 +1192,41 @@ refreshBtnEl?.addEventListener('click', async () => {
       refreshBtnEl.style.opacity = '1';
     }, 600);
   }
+});
+
+/* ============================================================
+   IMAGE LIGHTBOX (click to zoom)
+   ============================================================ */
+chatBody.addEventListener('click', (e) => {
+  const img = e.target.closest('.chat-image');
+  if (!img) return;
+  openImageLightbox(img.src, img.alt);
+});
+
+function openImageLightbox(src, alt) {
+  const overlay = document.createElement('div');
+  overlay.className = 'image-lightbox';
+  overlay.innerHTML = `
+    <button class="image-lightbox-close" aria-label="Close">&times;</button>
+    <img src="${encodeURI(src)}" alt="${escapeHtml(alt || '')}">
+  `;
+  overlay.addEventListener('click', () => overlay.remove());
+  document.body.appendChild(overlay);
+  document.addEventListener('keydown', function escHandler(ev) {
+    if (ev.key === 'Escape') {
+      overlay.remove();
+      document.removeEventListener('keydown', escHandler);
+    }
+  });
+}
+
+/* ============================================================
+   AUTO-CLEAR UNREAD WHEN USER SCROLLS TO BOTTOM
+   ============================================================ */
+chatBody.addEventListener('scroll', () => {
+  if (unreadCount === 0) return;
+  const atBottom = chatBody.scrollHeight - chatBody.scrollTop - chatBody.clientHeight < 50;
+  if (atBottom) clearUnreadState();
 });
 
 /* ============================================================
@@ -1138,15 +1243,15 @@ document.addEventListener("click", function (event) {
 });
 
 /* ============================================================
-   POLLING + VISIBILITY (kept from v0)
+   POLLING + VISIBILITY (10s interval)
    ============================================================ */
-timerInterval = setInterval(() => { loadAllMessages(listofdata); }, 30000);
+timerInterval = setInterval(() => { loadAllMessages(listofdata); }, POLL_INTERVAL_MS);
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     clearInterval(timerInterval);
   } else {
-    timerInterval = setInterval(() => { loadAllMessages(listofdata); }, 30000);
+    timerInterval = setInterval(() => { loadAllMessages(listofdata); }, POLL_INTERVAL_MS);
   }
 });
 
@@ -1160,8 +1265,10 @@ ZOHO.embeddedApp.on("PageLoad", async (data) => {
     fistLoad = true;
     fistLoadData = [];
     unreadDividerInserted = false;
+    unreadCount = 0;
     lastViewedAt = null;
     chatBody.innerHTML = '';
+    refreshUnreadBadge();
   }
 
   templateData = data;
