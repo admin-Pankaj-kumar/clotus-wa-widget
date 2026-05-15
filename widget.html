@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhatsApp History - Clotus Widget</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <style>
+    /* Flip-clock countdown (visual parity with v0) */
+    .wrap { position: relative; margin: auto; display: flex; column-gap: 10px; align-items: end; }
+    .countdown .bloc-time { float: left; margin-right: 15px; text-align: center; }
+    .countdown .bloc-time:last-child { margin-right: 0; }
+    .countdown .count-title { display: block; margin-bottom: 5px; font: normal 0.70em 'Inter', sans-serif; color: #ffffff36; text-transform: uppercase; }
+    .countdown .figure { position: relative; float: left; height: 40px; zoom: 50%; width: 35px; margin-right: 5px; background-color: #fff; border-radius: 8px; box-shadow: 0 3px 4px 0 rgba(0, 0, 0, 0.2); }
+    .countdown .figure:last-child { margin-right: 0; }
+    .countdown .figure > span { position: absolute; left: 0; right: 0; margin: auto; font: normal 2.5em/40px 'Inter', sans-serif; font-weight: 700; color: #075e54; }
+
+    /* Load more bar */
+    .load-more-bar { padding: 8px; text-align: center; background: transparent; }
+    .load-more-bar button { background: #fff; border: 1px solid #d0d7de; color: #075e54; font-family: inherit; font-size: 13px; padding: 6px 14px; border-radius: 16px; cursor: pointer; }
+    .load-more-bar button:hover { background: #f6f8fa; }
+    .load-more-bar button:disabled { opacity: 0.5; cursor: wait; }
+    .load-more-bar.hidden { display: none; }
+
+    /* Read-only banner */
+    .readonly-banner {
+      background: #fff8e1;
+      color: #856404;
+      font-size: 12px;
+      padding: 8px 12px;
+      border-bottom: 1px solid #ffe082;
+      text-align: center;
+    }
+    .readonly-banner .ti, .readonly-banner i { margin-right: 6px; }
+
+    .countdown.no-inbound { opacity: 0.4; }
+
+    .empty-state { color: #888; text-align: center; padding: 24px 12px; font-size: 13px; }
+
+    /* Hide the entire footer in read-only mode */
+    .chat-footer { display: none !important; }
+  </style>
+</head>
+
+<body>
+  <div class="chat-container" id="chatContainer">
+
+    <div class="chat-header">
+      <div class="chat-title" id="user_full_name">--</div>
+
+      <div class="wrap">
+        <div class="countdown" id="countdown">
+          <div class="bloc-time hours">
+            <span class="count-title">Hours</span>
+            <div class="figure"><span class="top">0</span><span class="top-back"><span>0</span></span><span class="bottom">0</span><span class="bottom-back"><span>0</span></span></div>
+            <div class="figure"><span class="top">0</span><span class="top-back"><span>0</span></span><span class="bottom">0</span><span class="bottom-back"><span>0</span></span></div>
+          </div>
+          <div class="bloc-time min">
+            <span class="count-title">Minutes</span>
+            <div class="figure"><span class="top">0</span><span class="top-back"><span>0</span></span><span class="bottom">0</span><span class="bottom-back"><span>0</span></span></div>
+            <div class="figure"><span class="top">0</span><span class="top-back"><span>0</span></span><span class="bottom">0</span><span class="bottom-back"><span>0</span></span></div>
+          </div>
+          <div class="bloc-time sec">
+            <span class="count-title">Seconds</span>
+            <div class="figure"><span class="top">0</span><span class="top-back"><span>0</span></span><span class="bottom">0</span><span class="bottom-back"><span>0</span></span></div>
+            <div class="figure"><span class="top">0</span><span class="top-back"><span>0</span></span><span class="bottom">0</span><span class="bottom-back"><span>0</span></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="readonly-banner">
+      <i class="fas fa-eye"></i>
+      Read-only view. Use the AiSensy panel to send messages.
+    </div>
+
+    <div class="chat-body" id="chatBody">
+      <div class="load-more-bar hidden" id="loadMoreBar">
+        <button id="loadMoreBtn" type="button">Load older messages</button>
+      </div>
+    </div>
+
+    <!-- Footer hidden via CSS in this build; kept in markup so the migration to full widget needs no DOM changes -->
+    <div class="chat-footer"></div>
+
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
