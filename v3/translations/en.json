@@ -1,0 +1,11 @@
+clotus-wa-widget/
+├── widget.html          ← OLD, unchanged
+├── script.js            ← OLD, unchanged
+├── styles.css           ← OLD, unchanged
+├── (icons)              ← OLD, unchanged
+└── v3/                  ← NEW v3 lives here
+    ├── widget.html
+    ├── script.js
+    ├── styles.css
+    ├── translations/en.json
+    └── (icons)
