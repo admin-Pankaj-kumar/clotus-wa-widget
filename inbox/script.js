@@ -1867,57 +1867,39 @@ function escapeHtmlAttr(s) {
   return escapeHtmlSafe(s).replace(/"/g, '&quot;');
 }
 
-function renderTemplateVarInputs(template, leadRec) {
+/* Resolve all variables silently from the field map + lead record.
+   Used to populate currentTemplateVars before send. No UI rendering. */
+function resolveTemplateVarsSilent(template, leadRec) {
   const strip = document.getElementById('tmplVarsStrip');
-  const list = document.getElementById('tmplVarsList');
-  if (!strip || !list) return;
+  if (strip) strip.classList.add('hidden');
 
   const vars = extractTemplateVars(template.body);
-  if (vars.length === 0) {
-    strip.classList.add('hidden');
-    list.innerHTML = '';
-    currentTemplateVars = {};
-    return;
-  }
+  currentTemplateVars = {};
+  if (vars.length === 0) return { vars: [], missing: [] };
 
   const meta = clotusTemplateMetaByName[template.name];
   const fieldMap = meta?.variable_field_map || {};
-  currentTemplateVars = {};
+  const missing = [];
 
-  list.innerHTML = '';
   vars.forEach(v => {
     const apiName = fieldMap[v] || '';
     const resolved = apiName ? resolveLeadFieldValue(leadRec, apiName) : '';
     currentTemplateVars[v] = resolved;
-
-    const row = document.createElement('div');
-    row.className = 'tmpl-var-row';
-    const isEmpty = !resolved;
-    const metaText = apiName
-      ? `from <b>${escapeHtmlSafe(apiName)}</b>${isEmpty ? ' (empty — please fill)' : ''}`
-      : '<em>no field mapped — please enter a value</em>';
-
-    row.innerHTML = `
-      <span class="tmpl-var-badge">{{${v}}}</span>
-      <div>
-        <input type="text" class="tmpl-var-input ${isEmpty ? 'is-empty' : ''}" data-var="${v}" placeholder="Enter value for {{${v}}}" value="${escapeHtmlAttr(resolved)}">
-        <div class="tmpl-var-meta">${metaText}</div>
-      </div>
-    `;
-    list.appendChild(row);
+    if (!resolved) {
+      missing.push({
+        variable: v,
+        apiName: apiName || '(no field mapped)',
+        reason: apiName ? `field "${apiName}" is empty on this lead` : 'no CRM field mapped to this variable'
+      });
+    }
   });
 
-  list.querySelectorAll('input.tmpl-var-input').forEach(input => {
-    input.addEventListener('input', e => {
-      const v = e.target.dataset.var;
-      currentTemplateVars[v] = e.target.value;
-      if (e.target.value.trim()) e.target.classList.remove('is-empty');
-      else e.target.classList.add('is-empty');
-      refreshTemplatePreview();
-    });
-  });
+  return { vars, missing };
+}
 
-  strip.classList.remove('hidden');
+/* Kept for back-compat — now just resolves silently */
+function renderTemplateVarInputs(template, leadRec) {
+  return resolveTemplateVarsSilent(template, leadRec);
 }
 
 function refreshTemplatePreview() {
@@ -1936,16 +1918,37 @@ function hideTemplateVarInputs() {
   currentTemplateVars = {};
 }
 
+// In-flight fetch promise so concurrent clicks share the same request
+let _templatesFetchPromise = null;
+async function ensureTemplatesLoaded() {
+  if (templates.length > 0) return templates;
+  if (_templatesFetchPromise) return _templatesFetchPromise;
+  _templatesFetchPromise = fetchTemplates().finally(() => { _templatesFetchPromise = null; });
+  return _templatesFetchPromise;
+}
+
 async function loadTemplates(loadTemp = null) {
   if (tabSelcted == 'reply') return;
-  if (templates.length === 0) await fetchTemplates();
+  if (templates.length === 0 && !loadTemp) {
+    dropdownList.innerHTML = '<div style="padding:12px;text-align:center;color:#64748B;font-size:13px;">Loading templates…</div>';
+    dropdownList.style.display = 'block';
+  }
+  await ensureTemplatesLoaded();
+  if (tabSelcted == 'reply') return;
   dropdownList.innerHTML = '';
-  templates.forEach(t => {
-    const item = document.createElement('div');
-    item.textContent = t.name;
-    item.onclick = () => showTemplate(t);
-    dropdownList.appendChild(item);
-  });
+  if (!templates || templates.length === 0) {
+    const empty = document.createElement('div');
+    empty.textContent = 'No templates available';
+    empty.style.cssText = 'padding:12px;text-align:center;color:#64748B;font-size:13px;';
+    dropdownList.appendChild(empty);
+  } else {
+    templates.forEach(t => {
+      const item = document.createElement('div');
+      item.textContent = t.name;
+      item.onclick = () => showTemplate(t);
+      dropdownList.appendChild(item);
+    });
+  }
   if (!loadTemp && templates.length) dropdownList.style.display = 'block';
 }
 
@@ -1974,8 +1977,16 @@ async function showTemplate(t) {
   searchInput.value = t?.name || '';
 
   const leadRec = await fetchActiveLeadFields(activeLeadData?.EntityId);
-  renderTemplateVarInputs(t, leadRec);
+  const { missing } = resolveTemplateVarsSilent(t, leadRec);
   refreshTemplatePreview();
+
+  if (missing.length > 0) {
+    const summary = missing.map(m => `{{${m.variable}}}: ${m.reason}`).join('; ');
+    console.warn('[Inbox] Template has unresolved variables:', missing);
+    if (typeof showToast === 'function') {
+      showToast('Some variables couldn\'t be filled: ' + summary, 'warn');
+    }
+  }
 }
 
 searchInput.addEventListener('click', () => loadTemplates());
