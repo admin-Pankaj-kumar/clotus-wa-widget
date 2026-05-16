@@ -264,6 +264,9 @@ function viewTemplate(t) {
   refreshVarInputs();
   updateAllCounts();
   updatePreview();
+  // Expand all sections so the full template is visible
+  document.querySelectorAll('.accordion').forEach(card => card.classList.add('is-open'));
+  updateAccordionStatuses();
 }
 
 /* ============================================================
@@ -309,6 +312,8 @@ function newTemplate() {
   updateAllCounts();
   clearErrors();
   updatePreview();
+  resetAccordion();
+  updateAccordionStatuses();
 }
 
 function closeEditor() {
@@ -442,6 +447,7 @@ async function handleMediaFile(file) {
       uploadedMedia.handle = result.id || result.handle;
       uploadStatus.className = 'upload-status success';
       uploadStatus.innerHTML = '<i class="fa-solid fa-circle-check"></i> Uploaded · ready for submission';
+      updateAccordionStatuses();
     } else {
       throw new Error('No media handle returned');
     }
@@ -550,10 +556,12 @@ function renderButtons() {
       buttons.splice(idx, 1);
       renderButtons();
       updatePreview();
+      updateAccordionStatuses();
     });
   });
 
   updatePreview();
+  updateAccordionStatuses();
 }
 
 addButtonBtn?.addEventListener('click', () => {
@@ -771,21 +779,25 @@ function updatePreview() {
 /* ============================================================
    FORM WIRING
    ============================================================ */
-fName?.addEventListener('input', () => clearError('name'));
+fName?.addEventListener('input', () => { clearError('name'); updateAccordionStatuses(); });
+fCategory?.addEventListener('change', updateAccordionStatuses);
+fLanguage?.addEventListener('change', updateAccordionStatuses);
 fBody?.addEventListener('input', () => {
   updateAllCounts();
   refreshVarInputs();
   updatePreview();
   clearError('body');
+  updateAccordionStatuses();
 });
-fFooter?.addEventListener('input', () => { updateAllCounts(); updatePreview(); });
-fHeaderText?.addEventListener('input', () => { updateAllCounts(); refreshVarInputs(); updatePreview(); });
+fFooter?.addEventListener('input', () => { updateAllCounts(); updatePreview(); updateAccordionStatuses(); });
+fHeaderText?.addEventListener('input', () => { updateAllCounts(); refreshVarInputs(); updatePreview(); updateAccordionStatuses(); });
 
 document.querySelectorAll('input[name="headerType"]').forEach(r => {
   r.addEventListener('change', e => {
     updateHeaderVisibility(e.target.value);
     refreshVarInputs();
     updatePreview();
+    updateAccordionStatuses();
   });
 });
 
@@ -793,6 +805,7 @@ document.querySelectorAll('input[name="buttonType"]').forEach(r => {
   r.addEventListener('change', e => {
     updateButtonVisibility(e.target.value);
     updatePreview();
+    updateAccordionStatuses();
   });
 });
 
@@ -1021,6 +1034,72 @@ ZOHO.embeddedApp.on('PageLoad', async () => {
   await refreshList();
   updatePreview();
   updateAllCounts();
+  updateAccordionStatuses();
+  wireAccordion();
 });
 
 ZOHO.embeddedApp.init();
+
+/* ============================================================
+   ACCORDION
+   ============================================================ */
+function wireAccordion() {
+  document.querySelectorAll('.accordion-toggle').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const card = btn.closest('.accordion');
+      card.classList.toggle('is-open');
+    });
+  });
+}
+
+function openAccordion(step) {
+  const card = document.querySelector(`.accordion[data-step="${step}"]`);
+  if (card) card.classList.add('is-open');
+}
+
+function resetAccordion() {
+  document.querySelectorAll('.accordion').forEach((card, idx) => {
+    card.classList.toggle('is-open', idx === 0);
+  });
+}
+
+function updateAccordionStatuses() {
+  // 1. Basics: name + category + language
+  const name = fName.value.trim();
+  setStatus(1, name ? `${name} · ${fCategory.value} · ${fLanguage.value}` : '');
+
+  // 2. Header
+  const headerType = document.querySelector('input[name="headerType"]:checked')?.value;
+  let headerSummary = '';
+  if (headerType === 'TEXT' && fHeaderText.value) headerSummary = 'Text';
+  else if (headerType === 'IMAGE') headerSummary = uploadedMedia?.handle ? '✓ Image' : 'Image';
+  else if (headerType === 'VIDEO') headerSummary = uploadedMedia?.handle ? '✓ Video' : 'Video';
+  else if (headerType === 'DOCUMENT') headerSummary = uploadedMedia?.handle ? '✓ Document' : 'Document';
+  setStatus(2, headerSummary);
+
+  // 3. Body
+  const body = fBody.value.trim();
+  if (body) {
+    const vars = extractVars(body);
+    setStatus(3, vars.length ? `${body.length} chars · ${vars.length} var${vars.length > 1 ? 's' : ''}` : `${body.length} chars`);
+  } else {
+    setStatus(3, '');
+  }
+
+  // 4. Footer
+  setStatus(4, fFooter.value.trim() ? `${fFooter.value.length} chars` : '');
+
+  // 5. Buttons
+  const btnType = document.querySelector('input[name="buttonType"]:checked')?.value;
+  if (btnType === 'QUICK_REPLY') setStatus(5, `${buttons.length} quick reply`);
+  else if (btnType === 'CTA') setStatus(5, `${buttons.length} CTA`);
+  else setStatus(5, '');
+}
+
+function setStatus(step, text) {
+  const el = document.getElementById('status-' + step);
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.toggle('has-value', !!text);
+}
