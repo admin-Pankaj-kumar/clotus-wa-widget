@@ -1315,19 +1315,56 @@ async function submitTemplate() {
   if (!validate()) return;
 
   submitBtn.disabled = true;
-  submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting…';
+  submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span class="btn-label">Saving…</span>';
 
   const payload = buildPayload();
   console.log('[Templates] === SUBMIT START ===');
   console.log('[Templates] Payload:', JSON.stringify(payload, null, 2));
 
-  // CONFIRMED URL from AiSensy Network tab: /direct-apis/t1/wa_template
-  // CRITICAL: use direct fetch() — ZOHO.CRM.HTTP.post mangles the request
-  const URL = 'https://backend.aisensy.com/direct-apis/t1/wa_template';
+  // === STEP 1: Save record in Zoho with Status=Submitted ===
+  // This gives us an audit trail even if AiSensy rejects the template.
+  let zohoRecordId = null;
+  try {
+    const draftRecord = buildZohoRecordFromPayload(payload, 'Submitted');
+    console.log('[Templates] Step 1: inserting Zoho record (Submitted)', draftRecord);
 
-  // Hard timeout so we never hang
+    const insertResp = await ZOHO.CRM.API.insertRecord({
+      Entity: 'Clotus_WA_Templates',
+      APIData: draftRecord,
+      Trigger: ['workflow']
+    });
+    console.log('[Templates] Insert response:', insertResp);
+
+    const result = insertResp?.data?.[0];
+    if (result?.status === 'success') {
+      zohoRecordId = result.details?.id;
+      console.log('[Templates] Zoho record created, id =', zohoRecordId);
+    } else {
+      // Zoho insert failed — abort before calling AiSensy
+      const errMsg = result?.message || result?.code || 'Unknown Zoho error';
+      console.error('[Templates] Zoho insert failed:', result);
+      showToast('Could not save draft to Zoho: ' + errMsg, 'error');
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> <span class="btn-label">Submit for approval</span>';
+      return;
+    }
+  } catch (e) {
+    console.error('[Templates] Zoho insert exception:', e);
+    showToast('Failed to save to Zoho: ' + (e.message || 'unknown'), 'error');
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> <span class="btn-label">Submit for approval</span>';
+    return;
+  }
+
+  // === STEP 2: Submit to AiSensy ===
+  submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span class="btn-label">Submitting to AiSensy…</span>';
+  const URL = 'https://backend.aisensy.com/direct-apis/t1/wa_template';
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+  let aisensyStatus = null;
+  let aisensyBody = null;
+  let aisensyRawText = '';
 
   try {
     const resp = await fetch(URL, {
@@ -1342,47 +1379,170 @@ async function submitTemplate() {
     });
     clearTimeout(timeoutId);
 
-    const status = resp.status;
-    const rawText = await resp.text();
-    console.log('[Templates] HTTP status:', status);
-    console.log('[Templates] Raw response body:', rawText);
+    aisensyStatus = resp.status;
+    aisensyRawText = await resp.text();
+    console.log('[Templates] AiSensy HTTP status:', aisensyStatus);
+    console.log('[Templates] AiSensy response body:', aisensyRawText);
 
-    let body = null;
-    try { body = JSON.parse(rawText); } catch (e) { body = rawText; }
-    console.log('[Templates] Parsed body:', body);
-
-    if (resp.ok) {
-      // 2xx success
-      console.log('[Templates] === SUBMIT SUCCESS ===');
-      showToast('Template submitted for approval ✓', 'success');
-      setTimeout(() => {
-        closeEditor();
-        refreshList();
-      }, 1200);
-    } else {
-      // Real error from AiSensy
-      const errMsg = (typeof body === 'object' ? (body?.error?.message || body?.errors?.[0]?.message || body?.message) : null) || `HTTP ${status}`;
-      console.error('[Templates] === SUBMIT FAILED ===', { status, body });
-      showToast('Failed (' + status + '): ' + errMsg, 'error');
-
-      // Show a more detailed error modal for 400s — usually field validation
-      if (status === 400) {
-        showSubmitErrorDetails(status, body, rawText);
-      }
-    }
+    try { aisensyBody = JSON.parse(aisensyRawText); } catch (e) { aisensyBody = aisensyRawText; }
   } catch (e) {
     clearTimeout(timeoutId);
     if (e.name === 'AbortError') {
-      console.error('[Templates] Submission timeout (>20s)');
-      showToast('Submission timed out. Check console + try again.', 'error');
+      console.error('[Templates] AiSensy submission timeout (>20s)');
+      aisensyStatus = 0;
+      aisensyBody = { error: { message: 'Request timed out after 20s' } };
     } else {
-      console.error('[Templates] Network exception:', e);
-      showToast('Network error: ' + (e.message || 'unknown'), 'error');
+      console.error('[Templates] AiSensy network exception:', e);
+      aisensyStatus = 0;
+      aisensyBody = { error: { message: e.message || 'Network error' } };
     }
-  } finally {
-    submitBtn.disabled = false;
-    submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Submit for approval';
   }
+
+  // === STEP 3: Update Zoho record based on AiSensy result ===
+  submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span class="btn-label">Finalizing…</span>';
+  const isSuccess = aisensyStatus >= 200 && aisensyStatus < 300;
+
+  try {
+    let updateFields;
+    if (isSuccess) {
+      // AiSensy accepted it — record AiSensy ID + set Status=Pending (waiting for Meta review)
+      const aisensyId = (aisensyBody && typeof aisensyBody === 'object') ? (aisensyBody.id || aisensyBody._id || '') : '';
+      // AiSensy may return status field (PENDING/APPROVED/REJECTED); map accordingly
+      const aisensyRawStatus = (aisensyBody && typeof aisensyBody === 'object') ? (aisensyBody.status || '').toUpperCase() : '';
+      const statusMap = { 'APPROVED': 'Approved', 'PENDING': 'Pending', 'REJECTED': 'Rejected' };
+      const mappedStatus = statusMap[aisensyRawStatus] || 'Pending';
+
+      updateFields = {
+        AiSensy_Template_ID: String(aisensyId).slice(0, 30),
+        Status: mappedStatus,
+        Submitted_Date: zohoDateTimeNow(),
+        Last_Synced: zohoDateTimeNow(),
+        Rejection_Reason: ''
+      };
+    } else {
+      // AiSensy rejected — revert Status to Draft so user can fix + retry
+      const errMsg = (aisensyBody && typeof aisensyBody === 'object')
+        ? (aisensyBody?.error?.message || aisensyBody?.errors?.[0]?.message || aisensyBody?.message || JSON.stringify(aisensyBody))
+        : String(aisensyBody || `HTTP ${aisensyStatus}`);
+
+      updateFields = {
+        Status: 'Draft',
+        Rejection_Reason: `[Submit failed @ ${new Date().toISOString()}] HTTP ${aisensyStatus}: ${String(errMsg).slice(0, 1800)}`,
+        Last_Synced: zohoDateTimeNow()
+      };
+    }
+
+    console.log('[Templates] Step 3: updating Zoho record', zohoRecordId, updateFields);
+    const updateResp = await ZOHO.CRM.API.updateRecord({
+      Entity: 'Clotus_WA_Templates',
+      RecordID: zohoRecordId,
+      APIData: updateFields,
+      Trigger: ['workflow']
+    });
+    console.log('[Templates] Update response:', updateResp);
+
+    const updResult = updateResp?.data?.[0];
+    if (updResult?.status !== 'success') {
+      console.warn('[Templates] Zoho update did not return success:', updResult);
+    }
+  } catch (e) {
+    console.error('[Templates] Zoho update exception:', e);
+    // Non-fatal — the record exists, status is just stale
+  }
+
+  // === STEP 4: User feedback ===
+  if (isSuccess) {
+    console.log('[Templates] === SUBMIT SUCCESS ===');
+    showToast('Template submitted for approval ✓ Saved to Zoho.', 'success');
+    setTimeout(() => {
+      closeEditor();
+      refreshList();
+    }, 1500);
+  } else {
+    console.error('[Templates] === SUBMIT FAILED ===', { aisensyStatus, aisensyBody });
+    const errMsg = (aisensyBody && typeof aisensyBody === 'object')
+      ? (aisensyBody?.error?.message || aisensyBody?.errors?.[0]?.message || aisensyBody?.message)
+      : null;
+    showToast('AiSensy rejected (' + aisensyStatus + '): ' + (errMsg || 'see console') + ' — saved as Draft.', 'error');
+    if (aisensyStatus === 400) {
+      showSubmitErrorDetails(aisensyStatus, aisensyBody, aisensyRawText);
+    }
+    // Still refresh the list so user can see the new Draft entry
+    setTimeout(() => refreshList(), 1500);
+  }
+
+  submitBtn.disabled = false;
+  submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> <span class="btn-label">Submit for approval</span>';
+}
+
+/* Build a Clotus_WA_Templates record from the AiSensy-shaped payload.
+   Used when we're inserting BEFORE submitting (status = 'Submitted')
+   or when we'd want a draft record locally. */
+function buildZohoRecordFromPayload(payload, initialStatus) {
+  const components = payload.components || [];
+  const headerComp = components.find(c => c.type === 'HEADER');
+  const bodyComp   = components.find(c => c.type === 'BODY');
+  const footerComp = components.find(c => c.type === 'FOOTER');
+  const btnComp    = components.find(c => c.type === 'BUTTONS');
+
+  // Header
+  let headerType = 'NONE';
+  let headerText = '';
+  let headerMediaHandle = '';
+  let headerMediaURL = '';
+  if (headerComp) {
+    const fmt = (headerComp.format || '').toUpperCase();
+    if (SUPPORTED_HEADER_TYPES.has(fmt)) headerType = fmt;
+    if (fmt === 'TEXT') headerText = (headerComp.text || '').slice(0, 60);
+    if (headerComp.example) {
+      const hh = headerComp.example.header_handle;
+      const hu = headerComp.example.header_url;
+      if (Array.isArray(hh) && hh.length) headerMediaHandle = String(hh[0] || '').slice(0, 255);
+      if (Array.isArray(hu) && hu.length) headerMediaURL    = String(hu[0] || '').slice(0, 450);
+    }
+  }
+
+  // Body + variable count
+  const bodyText = (bodyComp?.text || '').slice(0, 32000);
+  const varMatches = bodyText.match(/\{\{(\d+)\}\}/g) || [];
+  const variableCount = new Set(varMatches.map(v => v.replace(/[\{\}]/g, ''))).size;
+
+  // Footer
+  const footerText = (footerComp?.text || '').slice(0, 60);
+
+  // Buttons
+  let buttonsJson = '';
+  if (btnComp?.buttons?.length) {
+    try { buttonsJson = JSON.stringify(btnComp.buttons).slice(0, 2000); } catch (e) {}
+  }
+
+  // Components JSON (full backup)
+  let componentsJson = '';
+  try { componentsJson = JSON.stringify(components).slice(0, 32000); } catch (e) {}
+
+  // Variable field map (already in payload.crm_field_map from buildPayload)
+  let variableFieldMap = '';
+  if (payload.crm_field_map && Object.keys(payload.crm_field_map).length) {
+    try { variableFieldMap = JSON.stringify(payload.crm_field_map).slice(0, 2000); } catch (e) {}
+  }
+
+  return {
+    Name: (payload.name || '').slice(0, 200),
+    Status: initialStatus || 'Draft',
+    Category: SUPPORTED_CATEGORIES.has(payload.category) ? payload.category : 'UTILITY',
+    Language: SUPPORTED_LANGUAGES.has(payload.language) ? payload.language : 'en_US',
+    Header_Type: headerType,
+    Header_Text: headerText,
+    Header_Media_Handle: headerMediaHandle,
+    Header_Media_URL: headerMediaURL,
+    Body_Text: bodyText,
+    Footer_Text: footerText,
+    Buttons_JSON: buttonsJson,
+    Variable_Field_Map: variableFieldMap,
+    Variable_Count: variableCount,
+    Components_JSON: componentsJson,
+    Last_Synced: zohoDateTimeNow()
+  };
 }
 
 function showSubmitErrorDetails(status, body, rawText) {
