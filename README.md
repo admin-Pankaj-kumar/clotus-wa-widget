@@ -1,4 +1,4 @@
-# Clotus WhatsApp Widget (Read-Only)
+# Clotus WhatsApp Widget (Read-Only) 
 
 Embedded widget for Zoho CRM Lead detail pages that displays the
 full WhatsApp conversation history from the AiSensy Pro extension.
