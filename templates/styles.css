@@ -520,7 +520,7 @@ html, body {
 .form-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
   transition: box-shadow 0.15s;
@@ -533,8 +533,8 @@ html, body {
 .form-card-head {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 10px;
+  padding: 10px 14px;
   background: var(--surface);
   border-bottom: 1px solid transparent;
   width: 100%;
@@ -559,8 +559,8 @@ html, body {
 }
 
 .step-num {
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: var(--clotus-primary);
   color: #FFFFFF;
@@ -568,7 +568,7 @@ html, body {
   align-items: center;
   justify-content: center;
   font-weight: 700;
-  font-size: 12px;
+  font-size: 11px;
   flex-shrink: 0;
 }
 
@@ -582,15 +582,15 @@ html, body {
 }
 
 .form-card-head h3 {
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--text);
-  margin-bottom: 2px;
+  margin-bottom: 1px;
   line-height: 1.2;
 }
 
 .form-card-head p {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--text-muted);
   line-height: 1.3;
   white-space: nowrap;
@@ -599,7 +599,7 @@ html, body {
 }
 
 .form-card-head .optional {
-  font-size: 10px;
+  font-size: 9.5px;
   color: var(--text-faint);
   font-weight: 500;
   text-transform: uppercase;
@@ -609,7 +609,7 @@ html, body {
 
 .form-card-head code {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9.5px;
   background: var(--surface-2);
   padding: 1px 4px;
   border-radius: 3px;
@@ -617,12 +617,12 @@ html, body {
 }
 
 .accordion-status {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-muted);
   font-weight: 600;
   flex-shrink: 0;
   white-space: nowrap;
-  max-width: 140px;
+  max-width: 130px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -633,7 +633,7 @@ html, body {
 
 .accordion-chevron {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10px;
   transition: transform 0.2s ease;
   flex-shrink: 0;
 }
@@ -647,18 +647,18 @@ html, body {
   max-height: 0;
   overflow: hidden;
   transition: max-height 0.3s ease, padding 0.3s ease;
-  padding: 0 16px;
+  padding: 0 14px;
 }
 
 .form-card.accordion.is-open .accordion-body {
   max-height: 9999px;
-  padding: 14px 16px 16px;
+  padding: 12px 14px 14px;
 }
 
 .form-card-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .field-group {
