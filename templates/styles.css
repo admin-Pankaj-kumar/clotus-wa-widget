@@ -1403,14 +1403,161 @@ html, body {
   :root { --col-left-w: 240px; }
 }
 
-@media (max-width: 768px) {
+/* TABLET — 2 columns, keep both visible */
+@media (max-width: 768px) and (min-width: 641px) {
   .tmpl-body {
-    grid-template-columns: 1fr;
-  }
-  .col-left {
-    display: none; /* hidden on narrow; could become a drawer */
+    grid-template-columns: 240px 1fr;
   }
 }
+
+/* MOBILE PHONE — single-pane slide pattern */
+@media (max-width: 640px) {
+  /* Helpers */
+  .mobile-only { display: inline-flex; }
+  .desktop-only { display: none; }
+
+  /* Compact topbar */
+  .global-topbar {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+  .brand-mark {
+    width: 36px;
+    height: 36px;
+    font-size: 18px;
+    border-radius: 9px;
+  }
+  .brand-title { font-size: 13px; }
+  .brand-sub { font-size: 10px; }
+  .topbar-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+  .topbar-btn span { display: none; }
+
+  /* Body becomes overlay panes */
+  .tmpl-body {
+    display: block;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .col {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border-right: none;
+    transition: transform 0.25s ease;
+  }
+
+  .col-left   { transform: translateX(0); z-index: 1; }
+  .col-editor { transform: translateX(100%); z-index: 2; }
+
+  .tmpl-app[data-mobile-pane="editor"] .col-left   { transform: translateX(-100%); }
+  .tmpl-app[data-mobile-pane="editor"] .col-editor { transform: translateX(0); }
+
+  /* List tightening */
+  .list-header { padding: 12px; }
+  .list-title { font-size: 16px; }
+  .list-filters {
+    overflow-x: auto;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+  }
+  .list-filters::-webkit-scrollbar { display: none; }
+  .chip {
+    white-space: nowrap;
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+
+  /* Editor header */
+  .editor-header {
+    padding: 10px 12px;
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+  .editor-header-left {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .editor-title {
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .editor-header-right {
+    flex-shrink: 0;
+    gap: 6px;
+  }
+  .ghost-btn { padding: 6px 10px; font-size: 12px; }
+  .primary-cta {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+  .primary-cta .btn-label { display: none; }
+  .primary-cta i { margin: 0; }
+
+  /* Mobile back button */
+  .mobile-back-btn {
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 18px;
+    padding: 8px;
+    flex-shrink: 0;
+  }
+  .mobile-back-btn:active { background: var(--surface-2); }
+
+  /* Editor content: stack form + preview */
+  .editor-content {
+    grid-template-columns: 1fr;
+    padding: 12px;
+    gap: 14px;
+    overflow-y: auto;
+  }
+  .preview-pane {
+    order: -1;
+  }
+  .preview-sticky { position: relative; }
+  .phone-frame { max-width: 240px; }
+  .phone-screen { min-height: 380px; }
+
+  /* Accordion sections */
+  .accordion-header {
+    padding: 12px 14px;
+  }
+  .accordion-title {
+    font-size: 13px;
+  }
+  .accordion-content {
+    padding: 12px 14px;
+  }
+
+  /* Form fields */
+  .form-field input,
+  .form-field select,
+  .form-field textarea {
+    font-size: 14px;
+    padding: 9px 10px;
+  }
+  .form-field label {
+    font-size: 12px;
+  }
+
+  /* Submit error modal */
+  .submit-err-modal {
+    max-width: calc(100vw - 24px);
+  }
+}
+
+/* Mobile-only / desktop-only helpers (default state) */
+.mobile-only { display: none; }
+.desktop-only { display: inline-flex; }
 
 /* ========================================================================
    Submit error modal — shows AiSensy's full response on 400
