@@ -216,6 +216,23 @@
           </div>
 
           <div class="ptab-pane" id="pane-activities">
+            <!-- Task composer -->
+            <div class="task-composer">
+              <input type="text" id="taskInput" placeholder="Add a task…" maxlength="255">
+              <div class="task-composer-row">
+                <input type="date" id="taskDueDate" title="Due date">
+                <select id="taskPriority" title="Priority">
+                  <option value="Low">Low</option>
+                  <option value="Normal" selected>Normal</option>
+                  <option value="High">High</option>
+                  <option value="Highest">Highest</option>
+                </select>
+                <button class="task-add-btn" id="addTaskBtn" type="button">
+                  <i class="fa-solid fa-plus"></i> Add task
+                </button>
+              </div>
+            </div>
+
             <div class="empty-mini" id="activitiesEmpty">No activities yet.</div>
             <ul class="activity-list" id="activityList"></ul>
           </div>
