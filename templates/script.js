@@ -40,6 +40,17 @@ const btnList          = document.getElementById('btnList');
 const addButtonBtn     = document.getElementById('addButtonBtn');
 const buttonLimitHint  = document.getElementById('buttonLimitHint');
 
+const uploadBox        = document.getElementById('uploadBox');
+const mediaFile        = document.getElementById('mediaFile');
+const uploadEmpty      = document.getElementById('uploadEmpty');
+const uploadPreview    = document.getElementById('uploadPreview');
+const uploadThumb      = document.getElementById('uploadThumb');
+const uploadName       = document.getElementById('uploadName');
+const uploadSize       = document.getElementById('uploadSize');
+const uploadStatus     = document.getElementById('uploadStatus');
+const uploadRemove     = document.getElementById('uploadRemove');
+const uploadHint       = document.getElementById('uploadHint');
+
 const errName          = document.getElementById('err-name');
 const errBody          = document.getElementById('err-body');
 
@@ -62,6 +73,36 @@ let activeTemplateId = null;
 let isReadOnly = false;
 let buttons = []; // {type:'QUICK_REPLY'|'PHONE_NUMBER'|'URL', text, value}
 let varSamples = {}; // {1: 'Pankaj', 2: 'team'}
+let varCrmFields = {}; // {1: 'First_Name', 2: 'Last_Name'} — runtime mapping
+let uploadedMedia = null; // {handle, name, url, mimeType, size}
+
+/* Common Leads fields users will want to map to. Extend as needed. */
+const LEAD_FIELDS = [
+  { value: '', label: 'Pick CRM field…', group: '' },
+  { value: 'First_Name', label: 'First Name', group: 'Identity' },
+  { value: 'Last_Name', label: 'Last Name', group: 'Identity' },
+  { value: 'Full_Name', label: 'Full Name', group: 'Identity' },
+  { value: 'Salutation', label: 'Salutation', group: 'Identity' },
+  { value: 'Email', label: 'Email', group: 'Contact' },
+  { value: 'Phone', label: 'Phone', group: 'Contact' },
+  { value: 'Mobile', label: 'Mobile', group: 'Contact' },
+  { value: 'Company', label: 'Company', group: 'Business' },
+  { value: 'Industry', label: 'Industry', group: 'Business' },
+  { value: 'Designation', label: 'Designation', group: 'Business' },
+  { value: 'Annual_Revenue', label: 'Annual Revenue', group: 'Business' },
+  { value: 'Lead_Status', label: 'Lead Status', group: 'Lead' },
+  { value: 'Lead_Source', label: 'Lead Source', group: 'Lead' },
+  { value: 'Rating', label: 'Rating', group: 'Lead' },
+  { value: 'Street', label: 'Street', group: 'Address' },
+  { value: 'City', label: 'City', group: 'Address' },
+  { value: 'State', label: 'State', group: 'Address' },
+  { value: 'Zip_Code', label: 'Zip Code', group: 'Address' },
+  { value: 'Country', label: 'Country', group: 'Address' },
+  { value: 'Owner', label: 'Lead Owner', group: 'Ownership' },
+  { value: 'Created_Time', label: 'Created Time', group: 'System' },
+  { value: 'Modified_Time', label: 'Modified Time', group: 'System' },
+  { value: '__custom__', label: '— Custom / API name —', group: '' }
+];
 
 /* ============================================================
    UTILITIES
@@ -251,6 +292,8 @@ function newTemplate() {
   document.querySelector('input[name="buttonType"][value="NONE"]').checked = true;
   buttons = [];
   varSamples = {};
+  varCrmFields = {};
+  clearUpload();
 
   // Enable
   [fName, fCategory, fLanguage, fBody, fFooter, fHeaderText].forEach(el => el.disabled = false);
@@ -281,6 +324,148 @@ function closeEditor() {
 function updateHeaderVisibility(type) {
   gHeaderText.classList.toggle('hidden', type !== 'TEXT');
   gHeaderMedia.classList.toggle('hidden', !['IMAGE', 'VIDEO', 'DOCUMENT'].includes(type));
+
+  // Configure file accept + size hint based on type
+  if (type === 'IMAGE') {
+    mediaFile.accept = 'image/jpeg,image/png';
+    uploadHint.textContent = 'JPG or PNG · max 5 MB';
+  } else if (type === 'VIDEO') {
+    mediaFile.accept = 'video/mp4,video/3gpp';
+    uploadHint.textContent = 'MP4 or 3GP · max 16 MB';
+  } else if (type === 'DOCUMENT') {
+    mediaFile.accept = 'application/pdf';
+    uploadHint.textContent = 'PDF · max 100 MB';
+  }
+  // Reset upload when switching header type
+  if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(type)) {
+    clearUpload();
+  }
+}
+
+/* ============================================================
+   MEDIA UPLOAD
+   ============================================================ */
+function clearUpload() {
+  uploadedMedia = null;
+  mediaFile.value = '';
+  uploadEmpty.classList.remove('hidden');
+  uploadPreview.classList.add('hidden');
+  uploadThumb.innerHTML = '';
+  uploadStatus.textContent = '';
+  uploadStatus.className = 'upload-status';
+  updatePreview();
+}
+
+uploadBox?.addEventListener('click', (e) => {
+  if (e.target.closest('#uploadRemove')) return;
+  if (isReadOnly) return;
+  mediaFile.click();
+});
+
+uploadBox?.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  if (isReadOnly) return;
+  uploadBox.classList.add('dragover');
+});
+
+uploadBox?.addEventListener('dragleave', () => uploadBox.classList.remove('dragover'));
+
+uploadBox?.addEventListener('drop', (e) => {
+  e.preventDefault();
+  uploadBox.classList.remove('dragover');
+  if (isReadOnly) return;
+  const file = e.dataTransfer?.files?.[0];
+  if (file) handleMediaFile(file);
+});
+
+mediaFile?.addEventListener('change', (e) => {
+  const file = e.target.files?.[0];
+  if (file) handleMediaFile(file);
+});
+
+uploadRemove?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  clearUpload();
+});
+
+function fmtSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+}
+
+async function handleMediaFile(file) {
+  // Validate
+  const headerType = document.querySelector('input[name="headerType"]:checked')?.value;
+  const limits = { IMAGE: 5, VIDEO: 16, DOCUMENT: 100 };
+  const limit = limits[headerType] || 5;
+  if (file.size > limit * 1024 * 1024) {
+    showToast(`File exceeds ${limit} MB limit for ${headerType}`, 'error');
+    return;
+  }
+
+  uploadedMedia = { name: file.name, size: file.size, mimeType: file.type, file };
+
+  // Show preview
+  uploadEmpty.classList.add('hidden');
+  uploadPreview.classList.remove('hidden');
+  uploadName.textContent = file.name;
+  uploadSize.textContent = fmtSize(file.size);
+
+  uploadThumb.className = 'upload-thumb';
+  uploadThumb.innerHTML = '';
+  if (headerType === 'IMAGE') {
+    const reader = new FileReader();
+    reader.onload = e => {
+      uploadThumb.innerHTML = `<img src="${e.target.result}" alt="">`;
+      uploadedMedia.dataUrl = e.target.result;
+      updatePreview();
+    };
+    reader.readAsDataURL(file);
+  } else if (headerType === 'VIDEO') {
+    uploadThumb.classList.add('is-video');
+    uploadThumb.innerHTML = '<i class="fa-solid fa-video"></i>';
+  } else if (headerType === 'DOCUMENT') {
+    uploadThumb.classList.add('is-pdf');
+    uploadThumb.innerHTML = '<i class="fa-solid fa-file-pdf"></i>';
+  }
+
+  updatePreview();
+
+  // Upload to AiSensy
+  uploadStatus.className = 'upload-status uploading';
+  uploadStatus.innerHTML = '<span class="mini-spin"></span> Uploading to AiSensy…';
+
+  try {
+    const result = await uploadMediaToAisensy(file);
+    if (result?.id || result?.handle) {
+      uploadedMedia.handle = result.id || result.handle;
+      uploadStatus.className = 'upload-status success';
+      uploadStatus.innerHTML = '<i class="fa-solid fa-circle-check"></i> Uploaded · ready for submission';
+    } else {
+      throw new Error('No media handle returned');
+    }
+  } catch (err) {
+    console.error('Upload failed', err);
+    uploadStatus.className = 'upload-status error';
+    uploadStatus.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Upload failed — ' + (err.message || 'see console');
+    uploadedMedia.handle = null;
+  }
+}
+
+async function uploadMediaToAisensy(file) {
+  // Convert to base64 because ZOHO.CRM.HTTP doesn't support FormData easily
+  // Instead, use direct fetch (requires CORS to be open on AiSensy side)
+  const fd = new FormData();
+  fd.append('file', file);
+
+  const resp = await fetch('https://backend.aisensy.com/direct-apis/t1/media', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + AISENSY_TOKEN },
+    body: fd
+  });
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  return resp.json();
 }
 
 function updateButtonVisibility(type) {
@@ -403,19 +588,85 @@ function refreshVarInputs() {
   }
   gVars.classList.remove('hidden');
   varInputs.innerHTML = '';
+
+  // Build grouped select HTML once
+  const optgroups = {};
+  LEAD_FIELDS.forEach(f => {
+    if (!f.value || f.value === '__custom__') {
+      (optgroups[''] = optgroups[''] || []).push(f);
+    } else {
+      (optgroups[f.group] = optgroups[f.group] || []).push(f);
+    }
+  });
+  let selectHtml = '';
+  // Empty option first
+  selectHtml += `<option value="">Pick CRM field…</option>`;
+  Object.entries(optgroups).forEach(([g, fields]) => {
+    if (!g) return; // skip the placeholder bucket
+    selectHtml += `<optgroup label="${escapeHtml(g)}">`;
+    fields.forEach(f => {
+      selectHtml += `<option value="${escapeHtml(f.value)}">${escapeHtml(f.label)}</option>`;
+    });
+    selectHtml += `</optgroup>`;
+  });
+  selectHtml += `<option value="__custom__">— Custom / Other API name —</option>`;
+
   vars.forEach(v => {
     const row = document.createElement('div');
     row.className = 'var-input-row';
+    const mapped = varCrmFields[v] || '';
+    const isCustom = mapped && !LEAD_FIELDS.some(f => f.value === mapped);
+    const selectValue = isCustom ? '__custom__' : mapped;
+
     row.innerHTML = `
       <span class="var-label">{{${v}}}</span>
-      <input type="text" data-var="${v}" placeholder="Sample value for {{${v}}}" value="${escapeHtml(varSamples[v] || '')}">
+      <select data-var="${v}" data-role="crmfield">
+        ${selectHtml}
+      </select>
+      <input type="text" data-var="${v}" data-role="sample" placeholder="Sample value for preview" value="${escapeHtml(varSamples[v] || '')}">
     `;
     varInputs.appendChild(row);
+
+    // Set the selected option after the row is in the DOM
+    const sel = row.querySelector('select');
+    sel.value = selectValue;
+
+    // If custom, show a second row with text input for API name
+    if (isCustom) {
+      const customRow = document.createElement('div');
+      customRow.className = 'var-input-row';
+      customRow.innerHTML = `
+        <span></span>
+        <input type="text" data-var="${v}" data-role="customfield" placeholder="Custom field API name e.g. Lead_Source" value="${escapeHtml(mapped)}">
+        <span></span>
+      `;
+      varInputs.appendChild(customRow);
+    }
   });
-  varInputs.querySelectorAll('input').forEach(el => {
+
+  varInputs.querySelectorAll('select[data-role="crmfield"]').forEach(el => {
+    el.addEventListener('change', e => {
+      const v = e.target.dataset.var;
+      const val = e.target.value;
+      if (val === '__custom__') {
+        varCrmFields[v] = ''; // wait for custom input
+      } else {
+        varCrmFields[v] = val;
+      }
+      refreshVarInputs(); // re-render to show/hide custom input
+    });
+  });
+
+  varInputs.querySelectorAll('input[data-role="sample"]').forEach(el => {
     el.addEventListener('input', e => {
       varSamples[e.target.dataset.var] = e.target.value;
       updatePreview();
+    });
+  });
+
+  varInputs.querySelectorAll('input[data-role="customfield"]').forEach(el => {
+    el.addEventListener('input', e => {
+      varCrmFields[e.target.dataset.var] = e.target.value.trim();
     });
   });
 }
@@ -469,14 +720,21 @@ function updatePreview() {
     prevHeader.innerHTML = renderWhatsAppMarkdown(fHeaderText.value || 'Header text');
   } else {
     prevHeader.classList.remove('hidden');
-    prevHeader.classList.add('is-media');
-    const map = {
-      IMAGE: { icon: 'fa-image', label: 'Image' },
-      VIDEO: { icon: 'fa-video', label: 'Video' },
-      DOCUMENT: { icon: 'fa-file-lines', label: 'Document' }
-    };
-    const m = map[headerType];
-    prevHeader.innerHTML = `<i class="fa-regular ${m.icon}"></i><span>${m.label}</span>`;
+
+    // If we have an actual uploaded image, show it
+    if (headerType === 'IMAGE' && uploadedMedia?.dataUrl) {
+      prevHeader.classList.remove('is-media');
+      prevHeader.innerHTML = `<img src="${uploadedMedia.dataUrl}" alt="">`;
+    } else {
+      prevHeader.classList.add('is-media');
+      const map = {
+        IMAGE: { icon: 'fa-image', label: uploadedMedia?.name || 'Image' },
+        VIDEO: { icon: 'fa-video', label: uploadedMedia?.name || 'Video' },
+        DOCUMENT: { icon: 'fa-file-lines', label: uploadedMedia?.name || 'Document' }
+      };
+      const m = map[headerType];
+      prevHeader.innerHTML = `<i class="fa-regular ${m.icon}"></i><span>${escapeHtml(m.label)}</span>`;
+    }
   }
 
   // Body
@@ -603,12 +861,27 @@ function validate() {
     ok = false;
   }
 
+  // Media header requires upload
+  const headerType = document.querySelector('input[name="headerType"]:checked')?.value;
+  if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
+    if (!uploadedMedia?.handle) {
+      showToast(`Upload a sample ${headerType.toLowerCase()} for the header — Meta requires it for approval`, 'error');
+      ok = false;
+    }
+  }
+
   // CTA buttons need values
   const btnType = document.querySelector('input[name="buttonType"]:checked')?.value;
   if (btnType === 'CTA') {
     for (const b of buttons) {
       if (!b.text || !b.value) {
         showToast('Each CTA button needs text and a value (URL or phone)', 'error');
+        ok = false;
+        break;
+      }
+      // URL validation
+      if (b.type === 'URL' && !/^https?:\/\//i.test(b.value)) {
+        showToast(`URL button "${b.text}" must start with https://`, 'error');
         ok = false;
         break;
       }
@@ -641,11 +914,20 @@ function buildPayload() {
     }
     components.push(comp);
   } else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-    components.push({
-      type: 'HEADER',
-      format: headerType,
-      example: { header_handle: ['SAMPLE_PLACEHOLDER'] }
-    });
+    if (!uploadedMedia?.handle) {
+      // Will be caught by validate(), but build anyway
+      components.push({
+        type: 'HEADER',
+        format: headerType,
+        example: { header_handle: ['PLACEHOLDER_NO_UPLOAD'] }
+      });
+    } else {
+      components.push({
+        type: 'HEADER',
+        format: headerType,
+        example: { header_handle: [uploadedMedia.handle] }
+      });
+    }
   }
 
   // Body
@@ -672,12 +954,20 @@ function buildPayload() {
     components.push({ type: 'BUTTONS', buttons: cleanedButtons });
   }
 
-  return {
+  const payload = {
     name: fName.value.trim(),
     category: fCategory.value,
     language: fLanguage.value,
     components
   };
+
+  // Include CRM field mapping as metadata (AiSensy may ignore it,
+  // but we'll mirror to the CRM custom module so send-time can use it)
+  if (Object.keys(varCrmFields).length) {
+    payload.crm_field_map = varCrmFields;
+  }
+
+  return payload;
 }
 
 async function submitTemplate() {
