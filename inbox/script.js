@@ -638,6 +638,10 @@ function selectLead(leadId) {
   lastRenderedTime = null;
   fistLoad = true;
   fistLoadData = [];
+  // Invalidate per-lead caches so template var prefill pulls fresh data
+  activeLeadFields = null;
+  currentTemplate = null;
+  hideTemplateVarInputs();
   unreadCount = 0;
   lastViewedAt = null;
   chatBody.innerHTML = '';
@@ -1207,9 +1211,28 @@ function sendMessageToBackend(data, file_type = '', media_id = '', time = '', me
 
   return new Promise((resolve, reject) => {
     const func_name = 'aisensypro__get_aisensy_template_details_for_detail_page';
+
+    // Enrich template with resolved variable values (from Variable_Field_Map + edits)
+    let outgoingTemplate = currentTemplate;
+    if (tabSelcted !== 'reply' && currentTemplate && currentTemplateVars && Object.keys(currentTemplateVars).length > 0) {
+      const vars = Object.keys(currentTemplateVars).sort((a, b) => parseInt(a) - parseInt(b));
+      const templateParams = vars.map(k => String(currentTemplateVars[k] || ''));
+      let substitutedBody = currentTemplate.body || '';
+      vars.forEach(v => {
+        substitutedBody = substitutedBody.replaceAll(`{{${v}}}`, currentTemplateVars[v] || '');
+      });
+      outgoingTemplate = {
+        ...currentTemplate,
+        body: substitutedBody,
+        templateParams,
+        _resolvedVars: currentTemplateVars
+      };
+      console.log('[Inbox] Sending template with resolved vars:', { templateName: currentTemplate.name, templateParams });
+    }
+
     const body_args = media_type == '' ? {
       arguments: JSON.stringify({
-        [tabSelcted == 'reply' ? 'message' : 'template']: tabSelcted == 'reply' ? userInput.value : currentTemplate,
+        [tabSelcted == 'reply' ? 'message' : 'template']: tabSelcted == 'reply' ? userInput.value : outgoingTemplate,
         leadIds: data?.EntityId,
         outbound_date_time: time
       })
@@ -1767,6 +1790,152 @@ async function fetchTemplates() {
   finally { loader.style.display = 'none'; }
 }
 
+/* ============================================================
+   TEMPLATE FIELD-MAP CACHE (from Clotus_WA_Templates module)
+   Used at send-time to pre-fill {{N}} placeholders with the
+   active lead's CRM field values.
+   ============================================================ */
+let clotusTemplateMetaByName = {};
+let currentTemplateVars = {};
+let activeLeadFields = null;
+
+async function fetchClotusTemplateMeta() {
+  try {
+    const resp = await ZOHO.CRM.API.getAllRecords({
+      Entity: 'Clotus_WA_Templates',
+      per_page: 200,
+      page: 1
+    });
+    const list = typeof resp.data === 'string' ? JSON.parse(resp.data) : resp.data;
+    const map = {};
+    (list || []).forEach(rec => {
+      if (rec.Name) {
+        let fieldMap = {};
+        if (rec.Variable_Field_Map) {
+          try { fieldMap = JSON.parse(rec.Variable_Field_Map); } catch (e) { fieldMap = {}; }
+        }
+        map[rec.Name] = {
+          id: rec.id,
+          variable_field_map: fieldMap,
+          variable_count: parseInt(rec.Variable_Count, 10) || 0,
+          body_text: rec.Body_Text || '',
+          status: rec.Status
+        };
+      }
+    });
+    clotusTemplateMetaByName = map;
+    console.log('[Inbox] Loaded', Object.keys(map).length, 'template field maps from Clotus_WA_Templates');
+  } catch (e) {
+    console.warn('[Inbox] Could not fetch Clotus_WA_Templates field maps', e);
+    clotusTemplateMetaByName = {};
+  }
+}
+
+async function fetchActiveLeadFields(leadId) {
+  if (!leadId) return null;
+  if (activeLeadFields && activeLeadFields.__lead_id === leadId) return activeLeadFields;
+  try {
+    const resp = await ZOHO.CRM.API.getRecord({ Entity: 'Leads', RecordID: leadId });
+    const rec = typeof resp.data === 'string' ? JSON.parse(resp.data) : resp.data;
+    const r = Array.isArray(rec) ? rec[0] : rec;
+    if (r) { r.__lead_id = leadId; activeLeadFields = r; return r; }
+  } catch (e) { console.warn('[Inbox] fetchActiveLeadFields failed', e); }
+  return null;
+}
+
+function resolveLeadFieldValue(leadRec, fieldApiName) {
+  if (!leadRec || !fieldApiName) return '';
+  const v = leadRec[fieldApiName];
+  if (v == null) return '';
+  if (typeof v === 'object') return v.name || v.id || '';
+  return String(v);
+}
+
+function extractTemplateVars(bodyText) {
+  if (!bodyText) return [];
+  const matches = bodyText.match(/\{\{(\d+)\}\}/g) || [];
+  return [...new Set(matches.map(m => m.replace(/[\{\}]/g, '')))].sort((a, b) => parseInt(a) - parseInt(b));
+}
+
+function escapeHtmlSafe(s) {
+  if (s == null) return '';
+  const div = document.createElement('div');
+  div.textContent = String(s);
+  return div.innerHTML;
+}
+function escapeHtmlAttr(s) {
+  return escapeHtmlSafe(s).replace(/"/g, '&quot;');
+}
+
+function renderTemplateVarInputs(template, leadRec) {
+  const strip = document.getElementById('tmplVarsStrip');
+  const list = document.getElementById('tmplVarsList');
+  if (!strip || !list) return;
+
+  const vars = extractTemplateVars(template.body);
+  if (vars.length === 0) {
+    strip.classList.add('hidden');
+    list.innerHTML = '';
+    currentTemplateVars = {};
+    return;
+  }
+
+  const meta = clotusTemplateMetaByName[template.name];
+  const fieldMap = meta?.variable_field_map || {};
+  currentTemplateVars = {};
+
+  list.innerHTML = '';
+  vars.forEach(v => {
+    const apiName = fieldMap[v] || '';
+    const resolved = apiName ? resolveLeadFieldValue(leadRec, apiName) : '';
+    currentTemplateVars[v] = resolved;
+
+    const row = document.createElement('div');
+    row.className = 'tmpl-var-row';
+    const isEmpty = !resolved;
+    const metaText = apiName
+      ? `from <b>${escapeHtmlSafe(apiName)}</b>${isEmpty ? ' (empty — please fill)' : ''}`
+      : '<em>no field mapped — please enter a value</em>';
+
+    row.innerHTML = `
+      <span class="tmpl-var-badge">{{${v}}}</span>
+      <div>
+        <input type="text" class="tmpl-var-input ${isEmpty ? 'is-empty' : ''}" data-var="${v}" placeholder="Enter value for {{${v}}}" value="${escapeHtmlAttr(resolved)}">
+        <div class="tmpl-var-meta">${metaText}</div>
+      </div>
+    `;
+    list.appendChild(row);
+  });
+
+  list.querySelectorAll('input.tmpl-var-input').forEach(input => {
+    input.addEventListener('input', e => {
+      const v = e.target.dataset.var;
+      currentTemplateVars[v] = e.target.value;
+      if (e.target.value.trim()) e.target.classList.remove('is-empty');
+      else e.target.classList.add('is-empty');
+      refreshTemplatePreview();
+    });
+  });
+
+  strip.classList.remove('hidden');
+}
+
+function refreshTemplatePreview() {
+  if (!currentTemplate || !templateContent) return;
+  let preview = templateContent;
+  Object.keys(currentTemplateVars).forEach(v => {
+    const value = currentTemplateVars[v] || `{{${v}}}`;
+    preview = preview.replaceAll(`{{${v}}}`, value);
+  });
+  searchInput.value = preview;
+}
+
+function hideTemplateVarInputs() {
+  const strip = document.getElementById('tmplVarsStrip');
+  if (strip) strip.classList.add('hidden');
+  currentTemplateVars = {};
+}
+
 async function loadTemplates(loadTemp = null) {
   if (tabSelcted == 'reply') return;
   if (templates.length === 0) await fetchTemplates();
@@ -1799,21 +1968,25 @@ window.filterTemplates = function () {
   }
 };
 
-function showTemplate(t) {
+async function showTemplate(t) {
   currentTemplate = t;
   templateContent = t?.body;
-  searchInput.value = templateContent?.replaceAll('{{1}}', userName);
+  searchInput.value = t?.name || '';
+
+  const leadRec = await fetchActiveLeadFields(activeLeadData?.EntityId);
+  renderTemplateVarInputs(t, leadRec);
+  refreshTemplatePreview();
 }
 
 searchInput.addEventListener('click', () => loadTemplates());
 searchInput.addEventListener('keyup', () => {
-  if (searchInput.value.trim() === '') { currentTemplate = null; loadTemplates(); }
+  if (searchInput.value.trim() === '') { currentTemplate = null; hideTemplateVarInputs(); loadTemplates(); }
 });
 searchInput.addEventListener('input', window.filterTemplates);
 
 document.addEventListener('click', e => {
   if (!e.target.matches('#searchInput') && !dropdownList.contains(e.target)) dropdownList.style.display = 'none';
-  if (tabSelcted === 'reply') { currentTemplate = null; dropdownList.style.display = 'none'; }
+  if (tabSelcted === 'reply') { currentTemplate = null; hideTemplateVarInputs(); dropdownList.style.display = 'none'; }
 });
 
 /* Visibility */
@@ -1841,6 +2014,8 @@ ZOHO.embeddedApp.on('PageLoad', async () => {
   initMobileNav();
   await refreshConversations();
   await loadTemplates('load');
+  // Load Clotus_WA_Templates field-map cache in background (non-blocking)
+  fetchClotusTemplateMeta().catch(e => console.warn('[Inbox] Template meta load failed', e));
   if (relativeTimeInterval) clearInterval(relativeTimeInterval);
   relativeTimeInterval = setInterval(refreshAllRelativeTimes, 60000);
   listTimer = setInterval(refreshConversations, LIST_REFRESH_MS);
