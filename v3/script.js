@@ -573,9 +573,36 @@ function sendMessageToBackend(data, file_type = '', media_id = '', time = '', me
 
   return new Promise((resolve, reject) => {
     const func_name = "aisensypro__get_aisensy_template_details_for_detail_page";
+
+    // For template sends, enrich the template object with resolved variable values.
+    // The Deluge function may use either:
+    //   (a) templateParams array (standard AiSensy format), OR
+    //   (b) The pre-substituted body text
+    // We provide BOTH so whichever path the function takes, it gets correct data.
+    let outgoingTemplate = currentTemplate;
+    if (tabSelcted !== 'reply' && currentTemplate && currentTemplateVars && Object.keys(currentTemplateVars).length > 0) {
+      const vars = Object.keys(currentTemplateVars).sort((a, b) => parseInt(a) - parseInt(b));
+      const templateParams = vars.map(k => String(currentTemplateVars[k] || ''));
+
+      let substitutedBody = currentTemplate.body || '';
+      vars.forEach(v => {
+        const val = currentTemplateVars[v] || '';
+        substitutedBody = substitutedBody.replaceAll(`{{${v}}}`, val);
+      });
+
+      outgoingTemplate = {
+        ...currentTemplate,
+        body: substitutedBody,
+        templateParams: templateParams,
+        // Also include the raw map for debugging
+        _resolvedVars: currentTemplateVars
+      };
+      console.log('[v3] Sending template with resolved vars:', { templateName: currentTemplate.name, templateParams });
+    }
+
     const body_args = media_type == '' ? {
       "arguments": JSON.stringify({
-        [tabSelcted == 'reply' ? "message" : "template"]: tabSelcted == 'reply' ? userInput.value : currentTemplate,
+        [tabSelcted == 'reply' ? "message" : "template"]: tabSelcted == 'reply' ? userInput.value : outgoingTemplate,
         "leadIds": data?.EntityId,
         "outbound_date_time": time
       })
@@ -1046,6 +1073,7 @@ tabs.forEach(tab => {
           searchInput.placeholder = 'Send Message';
           dropdownList.style.display = "none";
           updateEmojiButton('reply');
+          hideTemplateVarInputs();
           break;
       }
     }
@@ -1288,6 +1316,173 @@ ZOHO.embeddedApp.on("PageLoad", async (data) => {
   relativeTimeInterval = setInterval(refreshAllRelativeTimes, 60000);
 
   /* ----- Templates ----- */
+
+  // Cache of Clotus_WA_Templates records by name → { id, variable_field_map, variable_count, ... }
+  // Pulled from Zoho once on load. Used at send-time to look up which CRM field
+  // populates each {{N}} placeholder.
+  let clotusTemplateMetaByName = {};
+  // Resolved values per variable for the currently-selected template: { '1': 'Pankaj', '2': 'Acme Corp' }
+  let currentTemplateVars = {};
+  // Active lead's record fields (cached from getRecord call)
+  let activeLeadFields = null;
+
+  async function fetchClotusTemplateMeta() {
+    try {
+      const resp = await ZOHO.CRM.API.getAllRecords({
+        Entity: 'Clotus_WA_Templates',
+        per_page: 200,
+        page: 1
+      });
+      const list = typeof resp.data === 'string' ? JSON.parse(resp.data) : resp.data;
+      const map = {};
+      (list || []).forEach(rec => {
+        if (rec.Name) {
+          let fieldMap = {};
+          if (rec.Variable_Field_Map) {
+            try { fieldMap = JSON.parse(rec.Variable_Field_Map); } catch (e) { fieldMap = {}; }
+          }
+          map[rec.Name] = {
+            id: rec.id,
+            variable_field_map: fieldMap,
+            variable_count: parseInt(rec.Variable_Count, 10) || 0,
+            body_text: rec.Body_Text || '',
+            status: rec.Status
+          };
+        }
+      });
+      clotusTemplateMetaByName = map;
+      console.log('[v3] Loaded', Object.keys(map).length, 'template field maps from Clotus_WA_Templates');
+    } catch (e) {
+      console.warn('[v3] Could not fetch Clotus_WA_Templates field maps — falling back to userName substitution', e);
+      clotusTemplateMetaByName = {};
+    }
+  }
+
+  async function fetchActiveLeadFields(leadId) {
+    if (!leadId) return null;
+    if (activeLeadFields && activeLeadFields.__lead_id === leadId) return activeLeadFields;
+    try {
+      const resp = await ZOHO.CRM.API.getRecord({ Entity: 'Leads', RecordID: leadId });
+      const rec = typeof resp.data === 'string' ? JSON.parse(resp.data) : resp.data;
+      const r = Array.isArray(rec) ? rec[0] : rec;
+      if (r) {
+        r.__lead_id = leadId;
+        activeLeadFields = r;
+        return r;
+      }
+    } catch (e) {
+      console.warn('[v3] fetchActiveLeadFields failed', e);
+    }
+    return null;
+  }
+
+  /* Resolve a CRM field API name to a display value from the lead record.
+     Handles lookup fields (returns .name), nested fields. */
+  function resolveLeadFieldValue(leadRec, fieldApiName) {
+    if (!leadRec || !fieldApiName) return '';
+    const v = leadRec[fieldApiName];
+    if (v == null) return '';
+    if (typeof v === 'object') return v.name || v.id || '';
+    return String(v);
+  }
+
+  /* Extract distinct variable numbers from a template body (e.g. "{{1}} {{3}}" → ['1','3']) */
+  function extractTemplateVars(bodyText) {
+    if (!bodyText) return [];
+    const matches = bodyText.match(/\{\{(\d+)\}\}/g) || [];
+    return [...new Set(matches.map(m => m.replace(/[\{\}]/g, '')))].sort((a, b) => parseInt(a) - parseInt(b));
+  }
+
+  /* Render the variable inputs strip above the composer */
+  function renderTemplateVarInputs(template, leadRec) {
+    const strip = document.getElementById('tmplVarsStrip');
+    const list = document.getElementById('tmplVarsList');
+    if (!strip || !list) return;
+
+    const vars = extractTemplateVars(template.body);
+    if (vars.length === 0) {
+      strip.classList.add('hidden');
+      list.innerHTML = '';
+      currentTemplateVars = {};
+      return;
+    }
+
+    const meta = clotusTemplateMetaByName[template.name];
+    const fieldMap = meta?.variable_field_map || {};
+    currentTemplateVars = {};
+
+    list.innerHTML = '';
+    vars.forEach(v => {
+      const apiName = fieldMap[v] || '';
+      const resolved = apiName ? resolveLeadFieldValue(leadRec, apiName) : '';
+      currentTemplateVars[v] = resolved;
+
+      const row = document.createElement('div');
+      row.className = 'tmpl-var-row';
+
+      const isEmpty = !resolved;
+      const metaText = apiName
+        ? `from <b>${escapeHtmlSafe(apiName)}</b>${isEmpty ? ' (empty — please fill)' : ''}`
+        : '<em>no field mapped — please enter a value</em>';
+
+      row.innerHTML = `
+        <span class="tmpl-var-badge">{{${v}}}</span>
+        <div>
+          <input type="text"
+                 class="tmpl-var-input ${isEmpty ? 'is-empty' : ''}"
+                 data-var="${v}"
+                 placeholder="Enter value for {{${v}}}"
+                 value="${escapeHtmlAttr(resolved)}">
+          <div class="tmpl-var-meta">${metaText}</div>
+        </div>
+      `;
+      list.appendChild(row);
+    });
+
+    // Wire input change → update state + refresh preview in searchInput
+    list.querySelectorAll('input.tmpl-var-input').forEach(input => {
+      input.addEventListener('input', e => {
+        const v = e.target.dataset.var;
+        currentTemplateVars[v] = e.target.value;
+        if (e.target.value.trim()) e.target.classList.remove('is-empty');
+        else e.target.classList.add('is-empty');
+        // Live-refresh the preview text in the composer input
+        refreshTemplatePreview();
+      });
+    });
+
+    strip.classList.remove('hidden');
+  }
+
+  /* Rebuild the searchInput.value preview by substituting current var values into the body */
+  function refreshTemplatePreview() {
+    if (!currentTemplate || !templateContent) return;
+    let preview = templateContent;
+    Object.keys(currentTemplateVars).forEach(v => {
+      const value = currentTemplateVars[v] || `{{${v}}}`;
+      preview = preview.replaceAll(`{{${v}}}`, value);
+    });
+    searchInput.value = preview;
+  }
+
+  /* Helpers to safely insert into HTML/attrs */
+  function escapeHtmlSafe(s) {
+    if (s == null) return '';
+    const div = document.createElement('div');
+    div.textContent = String(s);
+    return div.innerHTML;
+  }
+  function escapeHtmlAttr(s) {
+    return escapeHtmlSafe(s).replace(/"/g, '&quot;');
+  }
+
+  /* Hide variable inputs strip — used when switching to Reply tab or clearing template */
+  function hideTemplateVarInputs() {
+    const strip = document.getElementById('tmplVarsStrip');
+    if (strip) strip.classList.add('hidden');
+    currentTemplateVars = {};
+  }
+
   async function fetchTemplates() {
     loader.style.display = "inline-block";
     try {
@@ -1350,11 +1545,17 @@ ZOHO.embeddedApp.on("PageLoad", async (data) => {
     }
   };
 
-  function showTemplate(template) {
+  async function showTemplate(template) {
     currentTemplate = typeof template === "string" ? JSON.parse(template) : template;
     searchInput.value = currentTemplate?.name;
     templateContent = currentTemplate?.body;
-    searchInput.value = templateContent?.replaceAll('{{1}}', userName);
+
+    // Pull lead's record (cached) so we can pre-fill variable values
+    const leadRec = await fetchActiveLeadFields(data?.EntityId);
+    // Render the editable var inputs from the field map
+    renderTemplateVarInputs(currentTemplate, leadRec);
+    // And preview the substituted body in the composer input
+    refreshTemplatePreview();
   }
 
   searchInput.addEventListener("click", () => loadTemplates());
@@ -1364,13 +1565,15 @@ ZOHO.embeddedApp.on("PageLoad", async (data) => {
     if (searchTerm === "") {
       searchInput.value = "";
       currentTemplate = null;
+      hideTemplateVarInputs();
       loadTemplates();
     }
   });
 
   searchInput.addEventListener("input", window.filterTemplates);
 
-  loadTemplates('load');
+  // Load AiSensy templates list + Clotus_WA_Templates field-map cache in parallel
+  Promise.all([loadTemplates('load'), fetchClotusTemplateMeta()]).catch(e => console.warn('[v3] Init load partial failure', e));
 });
 
 ZOHO.embeddedApp.init();
