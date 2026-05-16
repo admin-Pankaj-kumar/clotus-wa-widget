@@ -1390,65 +1390,41 @@ ZOHO.embeddedApp.on("PageLoad", async (data) => {
     return [...new Set(matches.map(m => m.replace(/[\{\}]/g, '')))].sort((a, b) => parseInt(a) - parseInt(b));
   }
 
-  /* Render the variable inputs strip above the composer */
-  function renderTemplateVarInputs(template, leadRec) {
+  /* Resolve all variables silently from the field map + lead record.
+     Used to populate currentTemplateVars before send. No UI rendering — the
+     mapping is an admin task done in the template editor, not here. */
+  function resolveTemplateVarsSilent(template, leadRec) {
     const strip = document.getElementById('tmplVarsStrip');
-    const list = document.getElementById('tmplVarsList');
-    if (!strip || !list) return;
+    if (strip) strip.classList.add('hidden'); // ensure the old strip is never visible
 
     const vars = extractTemplateVars(template.body);
-    if (vars.length === 0) {
-      strip.classList.add('hidden');
-      list.innerHTML = '';
-      currentTemplateVars = {};
-      return;
-    }
+    currentTemplateVars = {};
+    if (vars.length === 0) return { vars: [], missing: [] };
 
     const meta = clotusTemplateMetaByName[template.name];
     const fieldMap = meta?.variable_field_map || {};
-    currentTemplateVars = {};
+    const missing = [];
 
-    list.innerHTML = '';
     vars.forEach(v => {
       const apiName = fieldMap[v] || '';
       const resolved = apiName ? resolveLeadFieldValue(leadRec, apiName) : '';
       currentTemplateVars[v] = resolved;
-
-      const row = document.createElement('div');
-      row.className = 'tmpl-var-row';
-
-      const isEmpty = !resolved;
-      const metaText = apiName
-        ? `from <b>${escapeHtmlSafe(apiName)}</b>${isEmpty ? ' (empty — please fill)' : ''}`
-        : '<em>no field mapped — please enter a value</em>';
-
-      row.innerHTML = `
-        <span class="tmpl-var-badge">{{${v}}}</span>
-        <div>
-          <input type="text"
-                 class="tmpl-var-input ${isEmpty ? 'is-empty' : ''}"
-                 data-var="${v}"
-                 placeholder="Enter value for {{${v}}}"
-                 value="${escapeHtmlAttr(resolved)}">
-          <div class="tmpl-var-meta">${metaText}</div>
-        </div>
-      `;
-      list.appendChild(row);
+      if (!resolved) {
+        missing.push({
+          variable: v,
+          apiName: apiName || '(no field mapped)',
+          reason: apiName ? `field "${apiName}" is empty on this lead` : 'no CRM field mapped to this variable'
+        });
+      }
     });
 
-    // Wire input change → update state + refresh preview in searchInput
-    list.querySelectorAll('input.tmpl-var-input').forEach(input => {
-      input.addEventListener('input', e => {
-        const v = e.target.dataset.var;
-        currentTemplateVars[v] = e.target.value;
-        if (e.target.value.trim()) e.target.classList.remove('is-empty');
-        else e.target.classList.add('is-empty');
-        // Live-refresh the preview text in the composer input
-        refreshTemplatePreview();
-      });
-    });
+    return { vars, missing };
+  }
 
-    strip.classList.remove('hidden');
+  /* Kept for back-compat with code paths that still call this — now just
+     resolves silently. The visible strip is permanently hidden. */
+  function renderTemplateVarInputs(template, leadRec) {
+    return resolveTemplateVarsSilent(template, leadRec);
   }
 
   /* Rebuild the searchInput.value preview by substituting current var values into the body */
@@ -1506,16 +1482,46 @@ ZOHO.embeddedApp.on("PageLoad", async (data) => {
     }
   }
 
+  // In-flight fetch promise so concurrent clicks share the same request
+  let _templatesFetchPromise = null;
+
+  async function ensureTemplatesLoaded() {
+    if (templates.length > 0) return templates;
+    if (_templatesFetchPromise) return _templatesFetchPromise;
+    _templatesFetchPromise = fetchTemplates().finally(() => {
+      _templatesFetchPromise = null;
+    });
+    return _templatesFetchPromise;
+  }
+
   async function loadTemplates(loadTemp = null) {
     if (tabSelcted == 'reply') return;
-    if (templates.length === 0) await fetchTemplates();
+
+    // Show a loading state immediately, so user gets feedback even if fetch is slow
+    if (templates.length === 0 && !loadTemp) {
+      dropdownList.innerHTML = '<div class="dropdown-loading" style="padding:12px;text-align:center;color:#64748B;font-size:13px;">Loading templates…</div>';
+      dropdownList.style.display = 'block';
+    }
+
+    await ensureTemplatesLoaded();
+
+    // If user switched tabs / typed something during the fetch, bail
+    if (tabSelcted == 'reply') return;
+
     dropdownList.innerHTML = "";
-    templates.forEach(template => {
-      const item = document.createElement("div");
-      item.textContent = template.name;
-      item.onclick = () => showTemplate(template);
-      dropdownList.appendChild(item);
-    });
+    if (!templates || templates.length === 0) {
+      const empty = document.createElement('div');
+      empty.textContent = 'No templates available';
+      empty.style.cssText = 'padding:12px;text-align:center;color:#64748B;font-size:13px;';
+      dropdownList.appendChild(empty);
+    } else {
+      templates.forEach(template => {
+        const item = document.createElement("div");
+        item.textContent = template.name;
+        item.onclick = () => showTemplate(template);
+        dropdownList.appendChild(item);
+      });
+    }
     if (!loadTemp && templates.length) {
       dropdownList.style.display = "block";
     }
@@ -1547,12 +1553,21 @@ ZOHO.embeddedApp.on("PageLoad", async (data) => {
     searchInput.value = currentTemplate?.name;
     templateContent = currentTemplate?.body;
 
-    // Pull lead's record (cached) so we can pre-fill variable values
+    // Pull lead's record (cached) so we can resolve variable values silently
     const leadRec = await fetchActiveLeadFields(data?.EntityId);
-    // Render the editable var inputs from the field map
-    renderTemplateVarInputs(currentTemplate, leadRec);
-    // And preview the substituted body in the composer input
+    const { missing } = resolveTemplateVarsSilent(currentTemplate, leadRec);
+    // Show resolved final message in the composer input (no {{1}} placeholders)
     refreshTemplatePreview();
+
+    // If anything's missing, warn but don't block — user might want to send anyway
+    if (missing.length > 0) {
+      const summary = missing.map(m => `{{${m.variable}}}: ${m.reason}`).join('; ');
+      console.warn('[v3] Template has unresolved variables:', missing);
+      // Use existing toast helper if present; otherwise fall back to a simple notice
+      if (typeof showToast === 'function') {
+        showToast('Some variables couldn\'t be filled: ' + summary, 'warn');
+      }
+    }
   }
 
   searchInput.addEventListener("click", () => loadTemplates());
