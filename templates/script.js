@@ -203,6 +203,290 @@ async function refreshList() {
 }
 
 /* ============================================================
+   SYNC FROM AISENSY → CLOTUS_WA_TEMPLATES MODULE
+   ----------------------------------------------------------------
+   Pulls every template from AiSensy and upserts it into the
+   Clotus_WA_Templates module in Zoho CRM. Existing records (matched
+   by AiSensy_Template_ID) are updated in place; new templates are
+   inserted as new records.
+
+   The module schema accepts these picklist values (case-sensitive):
+     Status:      Draft, Submitted, Pending, Approved, Rejected, Disabled
+     Category:    UTILITY, MARKETING, AUTHENTICATION
+     Language:    en, en_US, en_GB, hi, es, pt_BR, fr, ar, id, ja, zh_CN
+     Header_Type: NONE, TEXT, IMAGE, VIDEO
+   AiSensy returns Status as APPROVED/PENDING/REJECTED — we normalize
+   to title-case to match.
+   ============================================================ */
+
+const SUPPORTED_LANGUAGES = new Set([
+  'en', 'en_US', 'en_GB', 'hi', 'es', 'pt_BR', 'fr', 'ar', 'id', 'ja', 'zh_CN'
+]);
+const SUPPORTED_CATEGORIES = new Set(['UTILITY', 'MARKETING', 'AUTHENTICATION']);
+const SUPPORTED_HEADER_TYPES = new Set(['NONE', 'TEXT', 'IMAGE', 'VIDEO']);
+
+/* Convert an AiSensy template object into Zoho record fields */
+function aiSensyToZohoRecord(t) {
+  const components = Array.isArray(t.components) ? t.components : [];
+  const headerComp = components.find(c => c.type === 'HEADER');
+  const bodyComp   = components.find(c => c.type === 'BODY');
+  const footerComp = components.find(c => c.type === 'FOOTER');
+  const btnComp    = components.find(c => c.type === 'BUTTONS');
+
+  // Normalize header type
+  let headerType = 'NONE';
+  if (headerComp) {
+    const fmt = (headerComp.format || '').toUpperCase();
+    if (SUPPORTED_HEADER_TYPES.has(fmt)) headerType = fmt;
+    else if (fmt === 'DOCUMENT') headerType = 'NONE'; // module doesn't have DOCUMENT
+  }
+
+  const headerText = (headerComp && headerComp.format === 'TEXT') ? (headerComp.text || '') : '';
+
+  // Media handle/URL from header example, when present
+  let headerMediaHandle = '';
+  let headerMediaURL = '';
+  if (headerComp && headerComp.example) {
+    if (Array.isArray(headerComp.example.header_handle) && headerComp.example.header_handle.length > 0) {
+      headerMediaHandle = String(headerComp.example.header_handle[0] || '').slice(0, 255);
+    }
+    if (Array.isArray(headerComp.example.header_url) && headerComp.example.header_url.length > 0) {
+      headerMediaURL = String(headerComp.example.header_url[0] || '').slice(0, 450);
+    }
+  }
+
+  const bodyText = bodyComp?.text || '';
+  const footerText = (footerComp?.text || '').slice(0, 60);
+
+  // Count variables in body: matches {{1}}, {{2}}, etc.
+  const varMatches = bodyText.match(/\{\{(\d+)\}\}/g) || [];
+  const varNums = [...new Set(varMatches.map(v => v.replace(/\{\{|\}\}/g, '')))];
+  const variableCount = varNums.length;
+
+  // Buttons — preserve as JSON
+  let buttonsJson = '';
+  if (btnComp && Array.isArray(btnComp.buttons) && btnComp.buttons.length > 0) {
+    try {
+      buttonsJson = JSON.stringify(btnComp.buttons);
+      if (buttonsJson.length > 2000) buttonsJson = buttonsJson.slice(0, 2000);
+    } catch (e) { buttonsJson = ''; }
+  }
+
+  // Normalize status: AiSensy returns APPROVED, PENDING, REJECTED, etc.
+  // Map to module picklist values (title-case).
+  const rawStatus = (t.status || 'PENDING').toUpperCase();
+  const statusMap = {
+    'APPROVED': 'Approved',
+    'PENDING': 'Pending',
+    'REJECTED': 'Rejected',
+    'DISABLED': 'Disabled',
+    'PAUSED': 'Disabled',         // map paused → disabled
+    'PENDING_DELETION': 'Disabled',
+    'DELETED': 'Disabled'
+  };
+  const status = statusMap[rawStatus] || 'Pending';
+
+  // Category fallback
+  const rawCategory = (t.category || '').toUpperCase();
+  const category = SUPPORTED_CATEGORIES.has(rawCategory) ? rawCategory : 'UTILITY';
+
+  // Language fallback
+  const language = SUPPORTED_LANGUAGES.has(t.language) ? t.language : 'en_US';
+
+  // Rejection reason (some AiSensy responses include this)
+  let rejectionReason = '';
+  if (t.rejected_reason) rejectionReason = String(t.rejected_reason).slice(0, 2000);
+  else if (t.rejection_reason) rejectionReason = String(t.rejection_reason).slice(0, 2000);
+
+  // Components full payload — useful for re-submission, cap at 32000
+  let componentsJson = '';
+  try {
+    componentsJson = JSON.stringify(components);
+    if (componentsJson.length > 32000) componentsJson = componentsJson.slice(0, 32000);
+  } catch (e) {}
+
+  return {
+    Name: (t.name || '').slice(0, 200),
+    AiSensy_Template_ID: String(t.id || '').slice(0, 30),
+    Status: status,
+    Category: category,
+    Language: language,
+    Header_Type: headerType,
+    Header_Text: headerText.slice(0, 60),
+    Header_Media_Handle: headerMediaHandle,
+    Header_Media_URL: headerMediaURL,
+    Body_Text: bodyText.slice(0, 32000),
+    Footer_Text: footerText,
+    Buttons_JSON: buttonsJson,
+    Variable_Field_Map: '',  // empty by default — user fills this in
+    Variable_Count: variableCount,
+    Components_JSON: componentsJson,
+    Rejection_Reason: rejectionReason,
+    Last_Synced: zohoDateTimeNow()
+  };
+}
+
+/* Return current time in Zoho's expected datetime format: YYYY-MM-DDTHH:mm:ss±HH:mm */
+function zohoDateTimeNow() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const tzOffsetMin = -d.getTimezoneOffset(); // positive = east of UTC
+  const sign = tzOffsetMin >= 0 ? '+' : '-';
+  const tzH = pad(Math.floor(Math.abs(tzOffsetMin) / 60));
+  const tzM = pad(Math.abs(tzOffsetMin) % 60);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${sign}${tzH}:${tzM}`;
+}
+
+/* Main sync handler */
+async function syncFromAiSensy() {
+  const btn = document.getElementById('syncFromAiSensyBtn');
+  if (!btn) return;
+  if (btn.disabled) return; // already syncing
+
+  const origInner = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Syncing…</span>';
+
+  try {
+    console.log('[Sync] Starting sync from AiSensy...');
+    // 1) Pull all templates from AiSensy
+    const aisensyTemplates = await fetchTemplates();
+    if (!Array.isArray(aisensyTemplates) || aisensyTemplates.length === 0) {
+      showToast('No templates returned by AiSensy', 'error');
+      console.warn('[Sync] AiSensy returned 0 templates');
+      return;
+    }
+    console.log(`[Sync] Pulled ${aisensyTemplates.length} templates from AiSensy`);
+
+    // 2) Transform to Zoho records
+    const records = [];
+    const transformErrors = [];
+    aisensyTemplates.forEach((t, idx) => {
+      try {
+        records.push(aiSensyToZohoRecord(t));
+      } catch (e) {
+        transformErrors.push({ index: idx, name: t.name, error: e.message });
+        console.error('[Sync] Transform failed for template', t.name, e);
+      }
+    });
+    console.log(`[Sync] Transformed ${records.length} records. ${transformErrors.length} transform errors.`);
+
+    // 3) Upsert in chunks of 100 (Zoho API limit)
+    const CHUNK = 100;
+    let totalInserted = 0;
+    let totalUpdated = 0;
+    let totalFailed = 0;
+    const failureSamples = [];
+
+    for (let i = 0; i < records.length; i += CHUNK) {
+      const batch = records.slice(i, i + CHUNK);
+      btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> <span>Syncing ${i + batch.length}/${records.length}…</span>`;
+
+      try {
+        const resp = await ZOHO.CRM.API.upsertRecord({
+          Entity: 'Clotus_WA_Templates',
+          APIData: batch,
+          duplicate_check_fields: ['AiSensy_Template_ID'],
+          trigger: ['workflow']  // run workflow rules on upsert
+        });
+        console.log(`[Sync] Batch ${i / CHUNK + 1} response:`, resp);
+
+        const dataArr = resp?.data || [];
+        dataArr.forEach((entry, k) => {
+          if (entry.status === 'success') {
+            const action = entry?.action || entry?.details?.action; // 'insert' | 'update'
+            if (action === 'insert') totalInserted++;
+            else if (action === 'update') totalUpdated++;
+            else totalUpdated++; // assume update if not stated
+          } else {
+            totalFailed++;
+            if (failureSamples.length < 3) {
+              failureSamples.push({
+                name: batch[k]?.Name,
+                code: entry.code,
+                message: entry.message,
+                details: entry.details
+              });
+            }
+            console.warn('[Sync] Record failed:', batch[k]?.Name, entry);
+          }
+        });
+      } catch (e) {
+        console.error('[Sync] Batch upsert failed:', e);
+        totalFailed += batch.length;
+        if (failureSamples.length < 3) failureSamples.push({ batch: i, error: e.message });
+      }
+    }
+
+    // 4) Summary
+    const summary = `Sync complete — Inserted: ${totalInserted}, Updated: ${totalUpdated}, Failed: ${totalFailed}`;
+    console.log('[Sync]', summary);
+    if (transformErrors.length > 0) console.warn('[Sync] Transform errors:', transformErrors);
+    if (failureSamples.length > 0) console.warn('[Sync] Failure samples:', failureSamples);
+
+    if (totalFailed > 0) {
+      showToast(`${summary} — check console for details`, 'error');
+      showSyncSummaryModal({ totalInserted, totalUpdated, totalFailed, failureSamples, transformErrors });
+    } else {
+      showToast(`${summary} ✓`, 'success');
+    }
+  } catch (e) {
+    console.error('[Sync] Fatal sync error:', e);
+    showToast('Sync failed: ' + (e.message || 'unknown'), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origInner;
+  }
+}
+
+/* Show a modal with the failure details (for transparency) */
+function showSyncSummaryModal({ totalInserted, totalUpdated, totalFailed, failureSamples, transformErrors }) {
+  const existing = document.getElementById('sync-summary-modal');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'sync-summary-modal';
+  overlay.className = 'submit-err-overlay';
+
+  let failuresHtml = '';
+  if (failureSamples.length > 0) {
+    failuresHtml = '<p><b>Sample failures (first 3):</b></p><pre class="submit-err-pre"></pre>';
+  }
+
+  overlay.innerHTML = `
+    <div class="submit-err-modal">
+      <div class="submit-err-header">
+        <h3><i class="fa-solid fa-circle-info"></i> Sync summary</h3>
+        <button class="submit-err-close" type="button">&times;</button>
+      </div>
+      <div class="submit-err-body">
+        <p>
+          <b>Inserted:</b> ${totalInserted} &nbsp;·&nbsp;
+          <b>Updated:</b> ${totalUpdated} &nbsp;·&nbsp;
+          <b>Failed:</b> <span style="color:#DC2626">${totalFailed}</span>
+        </p>
+        ${transformErrors.length > 0 ? `<p><b>${transformErrors.length} templates couldn't be transformed</b> — likely missing required fields.</p>` : ''}
+        ${failuresHtml}
+      </div>
+      <div class="submit-err-footer">
+        <button class="submit-err-dismiss" type="button">Close</button>
+      </div>
+    </div>
+  `;
+
+  if (failureSamples.length > 0) {
+    overlay.querySelector('.submit-err-pre').textContent =
+      JSON.stringify(failureSamples, null, 2);
+  }
+
+  document.body.appendChild(overlay);
+  const closeFn = () => overlay.remove();
+  overlay.querySelector('.submit-err-close')?.addEventListener('click', closeFn);
+  overlay.querySelector('.submit-err-dismiss')?.addEventListener('click', closeFn);
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeFn(); });
+}
+
+/* ============================================================
    VIEW EXISTING TEMPLATE (read-only)
    ============================================================ */
 function viewTemplate(t) {
@@ -215,6 +499,7 @@ function viewTemplate(t) {
   editorEmptyEl.classList.add('hidden');
   editorShellEl.classList.remove('hidden');
   editorTitleEl.textContent = t.name;
+  setTmplMobilePane('editor');
 
   const status = (t.status || 'PENDING').toUpperCase();
   editorStatusEl.className = 'status-pill status-pill--' + status;
@@ -286,6 +571,7 @@ function newTemplate() {
   editorTitleEl.textContent = 'New template';
   editorStatusEl.className = 'status-pill status-pill--draft';
   editorStatusEl.textContent = 'Draft';
+  setTmplMobilePane('editor');
 
   // Reset form
   fName.value = '';
@@ -325,6 +611,43 @@ function closeEditor() {
   editorShellEl.classList.add('hidden');
   activeTemplateId = null;
   document.querySelectorAll('.template-row').forEach(r => r.classList.remove('active'));
+  setTmplMobilePane('list');
+}
+
+/* ============================================================
+   MOBILE PANE NAVIGATION (templates)
+   States: 'list' | 'editor'
+   ============================================================ */
+function setTmplMobilePane(pane) {
+  const root = document.querySelector('.tmpl-app');
+  if (!root) return;
+  if (window.innerWidth <= 640) {
+    root.setAttribute('data-mobile-pane', pane);
+  } else {
+    root.removeAttribute('data-mobile-pane');
+  }
+}
+
+function initTmplMobileNav() {
+  const backBtn = document.getElementById('tmplMobileBackBtn');
+  backBtn?.addEventListener('click', () => {
+    closeEditor();
+  });
+
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (window.innerWidth > 640) {
+        document.querySelector('.tmpl-app')?.removeAttribute('data-mobile-pane');
+      } else if (!document.querySelector('.tmpl-app')?.getAttribute('data-mobile-pane')) {
+        setTmplMobilePane(activeTemplateId || !editorShellEl.classList.contains('hidden') ? 'editor' : 'list');
+      }
+    }, 150);
+  });
+
+  // Initial
+  setTmplMobilePane('list');
 }
 
 /* ============================================================
@@ -831,6 +1154,7 @@ chipsEl.forEach(chip => {
 });
 
 refreshListBtn?.addEventListener('click', refreshList);
+document.getElementById('syncFromAiSensyBtn')?.addEventListener('click', syncFromAiSensy);
 newTemplateBtn?.addEventListener('click', newTemplate);
 newTemplateBtn2?.addEventListener('click', newTemplate);
 cancelBtn?.addEventListener('click', closeEditor);
@@ -1116,6 +1440,7 @@ submitBtn?.addEventListener('click', submitTemplate);
    INIT
    ============================================================ */
 ZOHO.embeddedApp.on('PageLoad', async () => {
+  initTmplMobileNav();
   setTime();
   setInterval(setTime, 30000);
   await refreshList();
