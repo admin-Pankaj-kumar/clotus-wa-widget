@@ -2173,3 +2173,91 @@ html, body {
   font-weight: 600;
   font-family: var(--font-mono);
 }
+
+/* ============================================================
+   Template variable inputs strip
+   ============================================================ */
+.tmpl-vars-strip {
+  background: linear-gradient(180deg, rgba(0, 180, 230, 0.06) 0%, rgba(0, 180, 230, 0.02) 100%);
+  border-top: 1px solid var(--border, #E2E8F0);
+  border-bottom: 1px solid var(--border, #E2E8F0);
+  padding: 10px 14px;
+  max-height: 200px;
+  overflow-y: auto;
+  animation: tmpl-vars-slide-in 0.18s ease;
+}
+@keyframes tmpl-vars-slide-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.tmpl-vars-strip.hidden { display: none; }
+.tmpl-vars-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.tmpl-vars-label {
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--clotus-primary, #1E2A5E);
+  text-transform: uppercase;
+}
+.tmpl-vars-hint {
+  font-size: 11px;
+  color: var(--text-muted, #64748B);
+}
+.tmpl-vars-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+.tmpl-var-row {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  gap: 8px;
+  align-items: center;
+}
+.tmpl-var-badge {
+  background: var(--clotus-primary, #1E2A5E);
+  color: #FFFFFF;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+.tmpl-var-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border, #E2E8F0);
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #FFFFFF;
+  color: var(--text, #0F172A);
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.tmpl-var-input:focus {
+  outline: none;
+  border-color: var(--clotus-accent, #00B4E6);
+  box-shadow: 0 0 0 3px rgba(0, 180, 230, 0.15);
+}
+.tmpl-var-input.is-empty {
+  border-color: #F59E0B;
+  background: #FFFBEB;
+}
+.tmpl-var-meta {
+  font-size: 10px;
+  color: var(--text-muted, #64748B);
+  font-style: italic;
+}
+.tmpl-var-input.is-empty + .tmpl-var-meta {
+  color: #B45309;
+  font-weight: 600;
+}
