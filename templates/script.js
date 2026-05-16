@@ -1446,8 +1446,33 @@ async function submitTemplate() {
       console.warn('[Templates] Zoho update did not return success:', updResult);
     }
   } catch (e) {
-    console.error('[Templates] Zoho update exception:', e);
-    // Non-fatal — the record exists, status is just stale
+    // Zoho SDK throws an object with the actual response body in `data`.
+    // Pull every detail out so we know which field is being rejected.
+    console.error('[Templates] Zoho update exception (raw):', e);
+    console.error('[Templates] Exception data field:', e?.data);
+    console.error('[Templates] Exception responseHeaders:', e?.$responseHeaders);
+    if (e?.data && Array.isArray(e.data)) {
+      e.data.forEach((entry, i) => {
+        console.error(`[Templates] Update error detail [${i}]:`, JSON.stringify(entry, null, 2));
+      });
+    }
+    // Try again with ONLY safe fields to see if a specific field caused the failure
+    console.warn('[Templates] Retrying update with minimal fields only...');
+    try {
+      const minimalUpdate = {
+        Status: isSuccess ? 'Pending' : 'Draft'
+      };
+      console.log('[Templates] Retry payload:', minimalUpdate);
+      const retryResp = await ZOHO.CRM.API.updateRecord({
+        Entity: 'Clotus_WA_Templates',
+        RecordID: zohoRecordId,
+        APIData: minimalUpdate
+      });
+      console.log('[Templates] Retry response:', retryResp);
+    } catch (retryErr) {
+      console.error('[Templates] Retry also failed:', retryErr);
+      console.error('[Templates] Retry data:', retryErr?.data);
+    }
   }
 
   // === STEP 4: User feedback ===
