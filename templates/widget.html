@@ -97,19 +97,21 @@
         <!-- 2-pane content: form (left) + preview (right) -->
         <div class="editor-content">
 
-          <!-- ===== FORM ===== -->
+          <!-- ===== FORM (accordion) ===== -->
           <section class="form-pane">
 
-            <!-- Step 1: Basics -->
-            <div class="form-card">
-              <div class="form-card-head">
+            <!-- Step 1: Basics (open by default) -->
+            <div class="form-card accordion is-open" data-step="1">
+              <button class="form-card-head accordion-toggle" type="button">
                 <span class="step-num">1</span>
-                <div>
+                <div class="form-card-head-text">
                   <h3>Basics</h3>
                   <p>Name, category and language for this template.</p>
                 </div>
-              </div>
-              <div class="form-card-body">
+                <span class="accordion-status" id="status-1"></span>
+                <i class="fa-solid fa-chevron-down accordion-chevron"></i>
+              </button>
+              <div class="form-card-body accordion-body">
                 <div class="field-group">
                   <label for="f-name">Template name <span class="req">*</span></label>
                   <input type="text" id="f-name" placeholder="welcome_message" maxlength="512">
@@ -146,16 +148,18 @@
               </div>
             </div>
 
-            <!-- Step 2: Header (optional) -->
-            <div class="form-card">
-              <div class="form-card-head">
+            <!-- Step 2: Header (collapsed by default) -->
+            <div class="form-card accordion" data-step="2">
+              <button class="form-card-head accordion-toggle" type="button">
                 <span class="step-num">2</span>
-                <div>
+                <div class="form-card-head-text">
                   <h3>Header <span class="optional">(optional)</span></h3>
                   <p>Add a header on top of the message body.</p>
                 </div>
-              </div>
-              <div class="form-card-body">
+                <span class="accordion-status" id="status-2"></span>
+                <i class="fa-solid fa-chevron-down accordion-chevron"></i>
+              </button>
+              <div class="form-card-body accordion-body">
                 <div class="field-group">
                   <label>Header type</label>
                   <div class="radio-row">
@@ -202,16 +206,18 @@
               </div>
             </div>
 
-            <!-- Step 3: Body -->
-            <div class="form-card">
-              <div class="form-card-head">
+            <!-- Step 3: Body (collapsed by default) -->
+            <div class="form-card accordion" data-step="3">
+              <button class="form-card-head accordion-toggle" type="button">
                 <span class="step-num">3</span>
-                <div>
+                <div class="form-card-head-text">
                   <h3>Body <span class="req">*</span></h3>
                   <p>The main message. Use <code>{{1}}</code>, <code>{{2}}</code>… for variables.</p>
                 </div>
-              </div>
-              <div class="form-card-body">
+                <span class="accordion-status" id="status-3"></span>
+                <i class="fa-solid fa-chevron-down accordion-chevron"></i>
+              </button>
+              <div class="form-card-body accordion-body">
                 <div class="field-group">
                   <label for="f-body">Message body</label>
                   <textarea id="f-body" rows="5" maxlength="1024" placeholder="Hi {{1}},&#10;&#10;Thanks for your enquiry. Our team will reach out shortly.&#10;&#10;Regards,&#10;{{2}}"></textarea>
@@ -232,16 +238,18 @@
               </div>
             </div>
 
-            <!-- Step 4: Footer (optional) -->
-            <div class="form-card">
-              <div class="form-card-head">
+            <!-- Step 4: Footer (collapsed by default) -->
+            <div class="form-card accordion" data-step="4">
+              <button class="form-card-head accordion-toggle" type="button">
                 <span class="step-num">4</span>
-                <div>
+                <div class="form-card-head-text">
                   <h3>Footer <span class="optional">(optional)</span></h3>
                   <p>Small text at the bottom — no variables allowed.</p>
                 </div>
-              </div>
-              <div class="form-card-body">
+                <span class="accordion-status" id="status-4"></span>
+                <i class="fa-solid fa-chevron-down accordion-chevron"></i>
+              </button>
+              <div class="form-card-body accordion-body">
                 <div class="field-group">
                   <input type="text" id="f-footer" maxlength="60" placeholder="e.g. Reply STOP to unsubscribe">
                   <div class="field-help"><span id="footer-count">0</span>/60 characters</div>
@@ -249,16 +257,18 @@
               </div>
             </div>
 
-            <!-- Step 5: Buttons (optional) -->
-            <div class="form-card">
-              <div class="form-card-head">
+            <!-- Step 5: Buttons (collapsed by default) -->
+            <div class="form-card accordion" data-step="5">
+              <button class="form-card-head accordion-toggle" type="button">
                 <span class="step-num">5</span>
-                <div>
+                <div class="form-card-head-text">
                   <h3>Buttons <span class="optional">(optional)</span></h3>
                   <p>Call-to-action or quick reply buttons.</p>
                 </div>
-              </div>
-              <div class="form-card-body">
+                <span class="accordion-status" id="status-5"></span>
+                <i class="fa-solid fa-chevron-down accordion-chevron"></i>
+              </button>
+              <div class="form-card-body accordion-body">
                 <div class="field-group">
                   <label>Button type</label>
                   <div class="radio-row">
