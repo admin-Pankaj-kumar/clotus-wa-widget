@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhatsApp Templates — Clotus</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
+</head>
+<body>
+
+<div class="tmpl-app">
+
+  <!-- ============= TOPBAR ============= -->
+  <header class="global-topbar">
+    <div class="brand">
+      <div class="brand-mark"><i class="fa-brands fa-whatsapp"></i></div>
+      <div class="brand-text">
+        <div class="brand-title">WhatsApp Templates</div>
+        <div class="brand-sub">Clotus · Create &amp; manage WhatsApp message templates</div>
+      </div>
+    </div>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-actions">
+      <button class="topbar-btn" id="refreshList" title="Refresh">
+        <i class="fa-solid fa-arrows-rotate"></i>
+        <span>Refresh</span>
+      </button>
+      <button class="topbar-btn topbar-btn--primary" id="newTemplateBtn">
+        <i class="fa-solid fa-plus"></i>
+        <span>New Template</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ============= BODY ============= -->
+  <div class="tmpl-body">
+
+    <!-- ===== LEFT: TEMPLATE LIST ===== -->
+    <aside class="col col-left">
+      <div class="list-header">
+        <div class="list-title-row">
+          <div class="list-title">Templates</div>
+          <span class="conv-count" id="templateCount">0</span>
+        </div>
+        <div class="list-search">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" id="templateSearchInput" placeholder="Search templates…" autocomplete="off">
+        </div>
+        <div class="list-filters">
+          <button class="chip chip-active" data-filter="all">All</button>
+          <button class="chip" data-filter="APPROVED">Approved</button>
+          <button class="chip" data-filter="PENDING">Pending</button>
+          <button class="chip" data-filter="REJECTED">Rejected</button>
+        </div>
+      </div>
+      <div class="lead-list" id="templateList">
+        <div class="list-loading">
+          <div class="spinner-lg"></div>
+          <span>Loading templates…</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ===== CENTER + RIGHT: EDITOR + PREVIEW ===== -->
+    <main class="col col-editor">
+
+      <!-- Empty state -->
+      <div class="editor-empty" id="editorEmpty">
+        <div class="editor-empty-icon"><i class="fa-regular fa-pen-to-square"></i></div>
+        <div class="editor-empty-title">Pick a template or create a new one</div>
+        <div class="editor-empty-sub">Templates are reusable WhatsApp message structures that must be approved by Meta before they can be used to send messages.</div>
+        <button class="primary-cta" id="newTemplateBtn2">
+          <i class="fa-solid fa-plus"></i> Create new template
+        </button>
+      </div>
+
+      <!-- Editor shell -->
+      <div class="editor-shell hidden" id="editorShell">
+
+        <!-- Editor header (status + actions) -->
+        <div class="editor-header">
+          <div class="editor-header-left">
+            <h2 class="editor-title" id="editorTitle">New template</h2>
+            <span class="status-pill status-pill--draft" id="editorStatus">Draft</span>
+          </div>
+          <div class="editor-header-right">
+            <button class="ghost-btn" id="cancelBtn">Cancel</button>
+            <button class="primary-cta" id="submitBtn">
+              <i class="fa-solid fa-paper-plane"></i> Submit for approval
+            </button>
+          </div>
+        </div>
+
+        <!-- 2-pane content: form (left) + preview (right) -->
+        <div class="editor-content">
+
+          <!-- ===== FORM (accordion) ===== -->
+          <section class="form-pane">
+
+            <!-- Step 1: Basics (open by default) -->
+            <div class="form-card accordion is-open" data-step="1">
+              <button class="form-card-head accordion-toggle" type="button">
+                <span class="step-num">1</span>
+                <div class="form-card-head-text">
+                  <h3>Basics</h3>
+                  <p>Name, category and language for this template.</p>
+                </div>
+                <span class="accordion-status" id="status-1"></span>
+                <i class="fa-solid fa-chevron-down accordion-chevron"></i>
+              </button>
+              <div class="form-card-body accordion-body">
+                <div class="field-group">
+                  <label for="f-name">Template name <span class="req">*</span></label>
+                  <input type="text" id="f-name" placeholder="welcome_message" maxlength="512">
+                  <div class="field-help">Lowercase letters, numbers and underscores only. This is how AiSensy/Meta identifies your template.</div>
+                  <div class="field-error" id="err-name"></div>
+                </div>
+
+                <div class="field-row">
+                  <div class="field-group">
+                    <label for="f-category">Category <span class="req">*</span></label>
+                    <select id="f-category">
+                      <option value="UTILITY">Utility — order updates, OTPs, account alerts</option>
+                      <option value="MARKETING">Marketing — promotions, offers, announcements</option>
+                      <option value="AUTHENTICATION">Authentication — 2FA codes only</option>
+                    </select>
+                  </div>
+                  <div class="field-group">
+                    <label for="f-language">Language <span class="req">*</span></label>
+                    <select id="f-language">
+                      <option value="en">English (en)</option>
+                      <option value="en_US" selected>English US (en_US)</option>
+                      <option value="en_GB">English UK (en_GB)</option>
+                      <option value="hi">Hindi (hi)</option>
+                      <option value="es">Spanish (es)</option>
+                      <option value="pt_BR">Portuguese Brazil (pt_BR)</option>
+                      <option value="fr">French (fr)</option>
+                      <option value="ar">Arabic (ar)</option>
+                      <option value="id">Indonesian (id)</option>
+                      <option value="ja">Japanese (ja)</option>
+                      <option value="zh_CN">Chinese (zh_CN)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 2: Header (collapsed by default) -->
+            <div class="form-card accordion" data-step="2">
+              <button class="form-card-head accordion-toggle" type="button">
+                <span class="step-num">2</span>
+                <div class="form-card-head-text">
+                  <h3>Header <span class="optional">(optional)</span></h3>
+                  <p>Add a header on top of the message body.</p>
+                </div>
+                <span class="accordion-status" id="status-2"></span>
+                <i class="fa-solid fa-chevron-down accordion-chevron"></i>
+              </button>
+              <div class="form-card-body accordion-body">
+                <div class="field-group">
+                  <label>Header type</label>
+                  <div class="radio-row">
+                    <label class="radio-card"><input type="radio" name="headerType" value="NONE" checked><span>None</span></label>
+                    <label class="radio-card"><input type="radio" name="headerType" value="TEXT"><span><i class="fa-solid fa-heading"></i> Text</span></label>
+                    <label class="radio-card"><input type="radio" name="headerType" value="IMAGE"><span><i class="fa-regular fa-image"></i> Image</span></label>
+                    <label class="radio-card"><input type="radio" name="headerType" value="VIDEO"><span><i class="fa-solid fa-video"></i> Video</span></label>
+                    <label class="radio-card"><input type="radio" name="headerType" value="DOCUMENT"><span><i class="fa-regular fa-file"></i> Document</span></label>
+                  </div>
+                </div>
+
+                <div class="field-group hidden" id="g-header-text">
+                  <label for="f-header-text">Header text <span class="req">*</span></label>
+                  <input type="text" id="f-header-text" maxlength="60" placeholder="e.g. Order update for {{1}}">
+                  <div class="field-help"><span id="header-text-count">0</span>/60 characters · supports one variable like <code>{{1}}</code></div>
+                </div>
+
+                <div class="field-group hidden" id="g-header-media">
+                  <label>Sample media for header <span class="req">*</span></label>
+                  <div class="field-help">Meta needs a sample of the media to approve the template. Upload it once — the file will be stored with the template.</div>
+
+                  <div class="upload-box" id="uploadBox">
+                    <input type="file" id="mediaFile" hidden>
+                    <div class="upload-empty" id="uploadEmpty">
+                      <i class="fa-solid fa-cloud-arrow-up"></i>
+                      <div class="upload-text">
+                        <strong>Click to upload</strong> or drag &amp; drop
+                        <div class="upload-hint" id="uploadHint">Images: JPG/PNG · max 5 MB</div>
+                      </div>
+                    </div>
+                    <div class="upload-preview hidden" id="uploadPreview">
+                      <div class="upload-thumb" id="uploadThumb"></div>
+                      <div class="upload-meta">
+                        <div class="upload-name" id="uploadName">file.jpg</div>
+                        <div class="upload-size" id="uploadSize">—</div>
+                        <div class="upload-status" id="uploadStatus"></div>
+                      </div>
+                      <button class="btn-remove" type="button" id="uploadRemove" title="Remove">
+                        <i class="fa-solid fa-trash-can"></i>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 3: Body (collapsed by default) -->
+            <div class="form-card accordion" data-step="3">
+              <button class="form-card-head accordion-toggle" type="button">
+                <span class="step-num">3</span>
+                <div class="form-card-head-text">
+                  <h3>Body <span class="req">*</span></h3>
+                  <p>The main message. Use <code>{{1}}</code>, <code>{{2}}</code>… for variables.</p>
+                </div>
+                <span class="accordion-status" id="status-3"></span>
+                <i class="fa-solid fa-chevron-down accordion-chevron"></i>
+              </button>
+              <div class="form-card-body accordion-body">
+                <div class="field-group">
+                  <label for="f-body">Message body</label>
+                  <textarea id="f-body" rows="5" maxlength="1024" placeholder="Hi {{1}},&#10;&#10;Thanks for your enquiry. Our team will reach out shortly.&#10;&#10;Regards,&#10;{{2}}"></textarea>
+                  <div class="field-help"><span id="body-count">0</span>/1024 characters · variables auto-detected below</div>
+                  <div class="field-error" id="err-body"></div>
+                </div>
+
+                <div class="field-group hidden" id="g-vars">
+                  <label>Variables — map to CRM fields</label>
+                  <div class="field-help">For each <code>{{1}}</code>, <code>{{2}}</code> in your body, pick which CRM lead field will fill it at send time. The "sample value" is what you'll see in the live preview and submit to Meta for approval.</div>
+                  <div class="var-inputs" id="varInputs"></div>
+                </div>
+
+                <div class="formatting-tip">
+                  <i class="fa-regular fa-lightbulb"></i>
+                  <span>Tip: <code>*bold*</code> · <code>_italic_</code> · <code>~strikethrough~</code> · <code>```mono```</code></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 4: Footer (collapsed by default) -->
+            <div class="form-card accordion" data-step="4">
+              <button class="form-card-head accordion-toggle" type="button">
+                <span class="step-num">4</span>
+                <div class="form-card-head-text">
+                  <h3>Footer <span class="optional">(optional)</span></h3>
+                  <p>Small text at the bottom — no variables allowed.</p>
+                </div>
+                <span class="accordion-status" id="status-4"></span>
+                <i class="fa-solid fa-chevron-down accordion-chevron"></i>
+              </button>
+              <div class="form-card-body accordion-body">
+                <div class="field-group">
+                  <input type="text" id="f-footer" maxlength="60" placeholder="e.g. Reply STOP to unsubscribe">
+                  <div class="field-help"><span id="footer-count">0</span>/60 characters</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 5: Buttons (collapsed by default) -->
+            <div class="form-card accordion" data-step="5">
+              <button class="form-card-head accordion-toggle" type="button">
+                <span class="step-num">5</span>
+                <div class="form-card-head-text">
+                  <h3>Buttons <span class="optional">(optional)</span></h3>
+                  <p>Call-to-action or quick reply buttons.</p>
+                </div>
+                <span class="accordion-status" id="status-5"></span>
+                <i class="fa-solid fa-chevron-down accordion-chevron"></i>
+              </button>
+              <div class="form-card-body accordion-body">
+                <div class="field-group">
+                  <label>Button type</label>
+                  <div class="radio-row">
+                    <label class="radio-card"><input type="radio" name="buttonType" value="NONE" checked><span>None</span></label>
+                    <label class="radio-card"><input type="radio" name="buttonType" value="QUICK_REPLY"><span><i class="fa-regular fa-comment"></i> Quick reply</span></label>
+                    <label class="radio-card"><input type="radio" name="buttonType" value="CTA"><span><i class="fa-solid fa-arrow-up-right-from-square"></i> Call-to-action</span></label>
+                  </div>
+                </div>
+
+                <div class="hidden" id="g-buttons">
+                  <div class="btn-list" id="btnList"></div>
+                  <button class="add-btn-row" id="addButtonBtn" type="button">
+                    <i class="fa-solid fa-plus"></i> Add button
+                  </button>
+                  <div class="field-help" id="buttonLimitHint"></div>
+                </div>
+              </div>
+            </div>
+
+          </section>
+
+          <!-- ===== PREVIEW (sticky right) ===== -->
+          <aside class="preview-pane">
+            <div class="preview-sticky">
+              <div class="preview-label">Live preview</div>
+              <div class="phone-frame">
+                <div class="phone-notch"></div>
+                <div class="phone-screen">
+                  <div class="phone-statusbar">
+                    <span class="phone-time">9:41</span>
+                    <span class="phone-icons">
+                      <i class="fa-solid fa-signal"></i>
+                      <i class="fa-solid fa-wifi"></i>
+                      <i class="fa-solid fa-battery-three-quarters"></i>
+                    </span>
+                  </div>
+                  <div class="phone-chat-header">
+                    <i class="fa-solid fa-arrow-left"></i>
+                    <div class="phone-avatar">B</div>
+                    <div class="phone-name">
+                      <div class="phone-name-1">Your business</div>
+                      <div class="phone-name-2">online</div>
+                    </div>
+                    <i class="fa-solid fa-video phone-call-icon"></i>
+                    <i class="fa-solid fa-phone phone-call-icon"></i>
+                  </div>
+                  <div class="phone-chat-body" id="previewBody">
+                    <div class="phone-bubble" id="previewBubble">
+                      <div class="phone-header hidden" id="prev-header"></div>
+                      <div class="phone-body" id="prev-body">Your message will appear here as you type.</div>
+                      <div class="phone-footer hidden" id="prev-footer"></div>
+                      <div class="phone-time-row">
+                        <span id="prev-time">9:41 AM</span>
+                      </div>
+                    </div>
+                    <div class="phone-buttons hidden" id="prev-buttons"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="preview-hint">
+                <i class="fa-regular fa-circle-question"></i>
+                <span>Preview updates as you edit the form. Variables show your sample values.</span>
+              </div>
+            </div>
+          </aside>
+
+        </div>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Footer -->
+  <footer class="appfooter">
+    <span class="powered">Powered by</span>
+    <a href="https://clotus.tech" target="_blank" rel="noopener" class="powered-link">clotus.tech</a>
+  </footer>
+
+</div>
+
+<!-- Toast for submit feedback -->
+<div class="toast hidden" id="toast"></div>
+
+<script src="script.js"></script>
+</body>
+</html>
