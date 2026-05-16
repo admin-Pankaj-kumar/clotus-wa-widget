@@ -29,6 +29,9 @@
     </div>
     <div class="topbar-spacer"></div>
     <div class="topbar-actions">
+      <button class="topbar-btn topbar-btn--icon" id="muteToggle" title="Mute notification sound">
+        <i class="fa-solid fa-bell" id="muteIcon"></i>
+      </button>
       <button class="topbar-btn" id="globalRefresh" title="Refresh">
         <i class="fa-solid fa-arrows-rotate"></i>
         <span>Refresh</span>
@@ -140,7 +143,7 @@
 
         <div class="chat-footer">
           <label for="smiley-emoji" class="smiley-emoji">
-            <span id="emoji-btn" class="smiley-emoji-icon" style="pointer-events: none; opacity: 0.5;">😊</span>
+            <span id="emoji-btn" class="smiley-emoji-icon" title="Insert emoji">😊</span>
           </label>
           <div class="w-98 message-container">
             <div class="tab-system">
@@ -293,9 +296,14 @@
   });
   function updateEmojiButton(status) {
     if (!emojiBtn) return;
-    const on = status === "reply";
-    emojiBtn.style.pointerEvents = on ? "auto" : "none";
-    emojiBtn.style.opacity = on ? "1" : "0.5";
+    // In the inbox web tab, emoji is always available — no gating
+    emojiBtn.style.pointerEvents = 'auto';
+    emojiBtn.style.opacity = '1';
+  }
+  // Initialize as enabled
+  if (emojiBtn) {
+    emojiBtn.style.pointerEvents = 'auto';
+    emojiBtn.style.opacity = '1';
   }
 </script>
 
