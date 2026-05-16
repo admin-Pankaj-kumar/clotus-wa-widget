@@ -174,8 +174,30 @@
                 </div>
 
                 <div class="field-group hidden" id="g-header-media">
-                  <label>Sample media for header</label>
-                  <div class="field-help">When you submit for approval, Meta needs a sample of the media (image/video/document). For preview only — you'll upload the real media in your CRM workflow.</div>
+                  <label>Sample media for header <span class="req">*</span></label>
+                  <div class="field-help">Meta needs a sample of the media to approve the template. Upload it once — the file will be stored with the template.</div>
+
+                  <div class="upload-box" id="uploadBox">
+                    <input type="file" id="mediaFile" hidden>
+                    <div class="upload-empty" id="uploadEmpty">
+                      <i class="fa-solid fa-cloud-arrow-up"></i>
+                      <div class="upload-text">
+                        <strong>Click to upload</strong> or drag &amp; drop
+                        <div class="upload-hint" id="uploadHint">Images: JPG/PNG · max 5 MB</div>
+                      </div>
+                    </div>
+                    <div class="upload-preview hidden" id="uploadPreview">
+                      <div class="upload-thumb" id="uploadThumb"></div>
+                      <div class="upload-meta">
+                        <div class="upload-name" id="uploadName">file.jpg</div>
+                        <div class="upload-size" id="uploadSize">—</div>
+                        <div class="upload-status" id="uploadStatus"></div>
+                      </div>
+                      <button class="btn-remove" type="button" id="uploadRemove" title="Remove">
+                        <i class="fa-solid fa-trash-can"></i>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -198,8 +220,8 @@
                 </div>
 
                 <div class="field-group hidden" id="g-vars">
-                  <label>Sample values for variables</label>
-                  <div class="field-help">Used for live preview &amp; required when submitting to Meta for approval.</div>
+                  <label>Variables — map to CRM fields</label>
+                  <div class="field-help">For each <code>{{1}}</code>, <code>{{2}}</code> in your body, pick which CRM lead field will fill it at send time. The "sample value" is what you'll see in the live preview and submit to Meta for approval.</div>
                   <div class="var-inputs" id="varInputs"></div>
                 </div>
 
