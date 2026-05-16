@@ -63,6 +63,10 @@ let leadPhone = null;
 
 let templates = [];
 let currentTemplate = null;
+// Module-level template state — referenced by sendMessageToBackend (which is at module level)
+let clotusTemplateMetaByName = {};
+let currentTemplateVars = {};
+let activeLeadFields = null;
 
 let fistLoad = true;
 let fistLoadData = [];
@@ -1316,15 +1320,8 @@ ZOHO.embeddedApp.on("PageLoad", async (data) => {
   relativeTimeInterval = setInterval(refreshAllRelativeTimes, 60000);
 
   /* ----- Templates ----- */
-
-  // Cache of Clotus_WA_Templates records by name → { id, variable_field_map, variable_count, ... }
-  // Pulled from Zoho once on load. Used at send-time to look up which CRM field
-  // populates each {{N}} placeholder.
-  let clotusTemplateMetaByName = {};
-  // Resolved values per variable for the currently-selected template: { '1': 'Pankaj', '2': 'Acme Corp' }
-  let currentTemplateVars = {};
-  // Active lead's record fields (cached from getRecord call)
-  let activeLeadFields = null;
+  // (Module-level state: clotusTemplateMetaByName, currentTemplateVars, activeLeadFields
+  //  declared at the top so sendMessageToBackend can reference them.)
 
   async function fetchClotusTemplateMeta() {
     try {
