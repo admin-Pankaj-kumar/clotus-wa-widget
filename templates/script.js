@@ -1,1105 +1,1413 @@
 /* ============================================================
-   Clotus WhatsApp Templates — Web Tab
-   ============================================================
-   - Lists templates from AiSensy direct API
-   - Creates new templates via AiSensy API
-   - Mirrors records in CRM module (when configured)
+   Clotus WhatsApp Templates — Web Tab styles
    ============================================================ */
 
-const AISENSY_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhc3Npc3RhbnRJZCI6IjY2ZTAzMWNhYzEzMTY2MGI3ODc2NWFjNSIsImNsaWVudElkIjoiNjZlMDMxY2FjMTMxNjYwYjc4NzY1YWJmIiwiaWF0IjoxNzQzMTQyOTczfQ.fimSFx_BcZSgxxMS8Lq0J2BJGElf7MvwMO2w1jdYp9s';
+:root {
+  --clotus-primary: #1E2A5E;
+  --clotus-primary-dark: #141C42;
+  --clotus-primary-light: #2A3A7E;
+  --clotus-primary-pale: #F0F2FA;
+  --clotus-accent: #00B4E6;
+  --clotus-accent-dark: #0099CC;
+  --clotus-accent-pale: #E6F8FD;
+  --clotus-highlight: #E91E63;
+  --clotus-highlight-pale: #FCE4EC;
 
-/* ---------- DOM refs ---------- */
-const templateListEl   = document.getElementById('templateList');
-const templateCountEl  = document.getElementById('templateCount');
-const templateSearchInput = document.getElementById('templateSearchInput');
-const refreshListBtn   = document.getElementById('refreshList');
-const newTemplateBtn   = document.getElementById('newTemplateBtn');
-const newTemplateBtn2  = document.getElementById('newTemplateBtn2');
-const chipsEl          = document.querySelectorAll('.chip');
+  --bg: #F4F5F8;
+  --surface: #FFFFFF;
+  --surface-2: #F4F5F8;
+  --border: #E4E6EE;
+  --border-strong: #C8CCDB;
+  --text: #1A1D2E;
+  --text-muted: #5A5F7A;
+  --text-faint: #A0A4BA;
 
-const editorEmptyEl    = document.getElementById('editorEmpty');
-const editorShellEl    = document.getElementById('editorShell');
-const editorTitleEl    = document.getElementById('editorTitle');
-const editorStatusEl   = document.getElementById('editorStatus');
-const cancelBtn        = document.getElementById('cancelBtn');
-const submitBtn        = document.getElementById('submitBtn');
+  --wa-bubble: #DCF8C6;
+  --wa-bubble-border: #C5E6AC;
+  --wa-bg: #ECE5DD;
 
-const fName            = document.getElementById('f-name');
-const fCategory        = document.getElementById('f-category');
-const fLanguage        = document.getElementById('f-language');
-const fBody            = document.getElementById('f-body');
-const fFooter          = document.getElementById('f-footer');
-const fHeaderText      = document.getElementById('f-header-text');
-const gHeaderText      = document.getElementById('g-header-text');
-const gHeaderMedia     = document.getElementById('g-header-media');
-const gVars            = document.getElementById('g-vars');
-const varInputs        = document.getElementById('varInputs');
+  --success: #10B981;
+  --warning: #F59E0B;
+  --danger: #EF4444;
 
-const gButtons         = document.getElementById('g-buttons');
-const btnList          = document.getElementById('btnList');
-const addButtonBtn     = document.getElementById('addButtonBtn');
-const buttonLimitHint  = document.getElementById('buttonLimitHint');
+  --shadow-sm: 0 1px 2px rgba(30, 42, 94, 0.05);
+  --shadow-md: 0 2px 8px rgba(30, 42, 94, 0.08);
+  --shadow-lg: 0 8px 24px rgba(30, 42, 94, 0.10);
 
-const uploadBox        = document.getElementById('uploadBox');
-const mediaFile        = document.getElementById('mediaFile');
-const uploadEmpty      = document.getElementById('uploadEmpty');
-const uploadPreview    = document.getElementById('uploadPreview');
-const uploadThumb      = document.getElementById('uploadThumb');
-const uploadName       = document.getElementById('uploadName');
-const uploadSize       = document.getElementById('uploadSize');
-const uploadStatus     = document.getElementById('uploadStatus');
-const uploadRemove     = document.getElementById('uploadRemove');
-const uploadHint       = document.getElementById('uploadHint');
+  --font-sans: 'Plus Jakarta Sans', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
 
-const errName          = document.getElementById('err-name');
-const errBody          = document.getElementById('err-body');
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
 
-const bodyCount        = document.getElementById('body-count');
-const footerCount      = document.getElementById('footer-count');
-const headerTextCount  = document.getElementById('header-text-count');
-
-const prevHeader       = document.getElementById('prev-header');
-const prevBody         = document.getElementById('prev-body');
-const prevFooter       = document.getElementById('prev-footer');
-const prevButtons      = document.getElementById('prev-buttons');
-const prevTime         = document.getElementById('prev-time');
-const toastEl          = document.getElementById('toast');
-
-/* ---------- STATE ---------- */
-let allTemplates = [];
-let filterStatus = 'all';
-let searchTerm = '';
-let activeTemplateId = null;
-let isReadOnly = false;
-let buttons = []; // {type:'QUICK_REPLY'|'PHONE_NUMBER'|'URL', text, value}
-let varSamples = {}; // {1: 'Pankaj', 2: 'team'}
-let varCrmFields = {}; // {1: 'First_Name', 2: 'Last_Name'} — runtime mapping
-let uploadedMedia = null; // {handle, name, url, mimeType, size}
-
-/* Common Leads fields users will want to map to. Extend as needed. */
-const LEAD_FIELDS = [
-  { value: '', label: 'Pick CRM field…', group: '' },
-  { value: 'First_Name', label: 'First Name', group: 'Identity' },
-  { value: 'Last_Name', label: 'Last Name', group: 'Identity' },
-  { value: 'Full_Name', label: 'Full Name', group: 'Identity' },
-  { value: 'Salutation', label: 'Salutation', group: 'Identity' },
-  { value: 'Email', label: 'Email', group: 'Contact' },
-  { value: 'Phone', label: 'Phone', group: 'Contact' },
-  { value: 'Mobile', label: 'Mobile', group: 'Contact' },
-  { value: 'Company', label: 'Company', group: 'Business' },
-  { value: 'Industry', label: 'Industry', group: 'Business' },
-  { value: 'Designation', label: 'Designation', group: 'Business' },
-  { value: 'Annual_Revenue', label: 'Annual Revenue', group: 'Business' },
-  { value: 'Lead_Status', label: 'Lead Status', group: 'Lead' },
-  { value: 'Lead_Source', label: 'Lead Source', group: 'Lead' },
-  { value: 'Rating', label: 'Rating', group: 'Lead' },
-  { value: 'Street', label: 'Street', group: 'Address' },
-  { value: 'City', label: 'City', group: 'Address' },
-  { value: 'State', label: 'State', group: 'Address' },
-  { value: 'Zip_Code', label: 'Zip Code', group: 'Address' },
-  { value: 'Country', label: 'Country', group: 'Address' },
-  { value: 'Owner', label: 'Lead Owner', group: 'Ownership' },
-  { value: 'Created_Time', label: 'Created Time', group: 'System' },
-  { value: 'Modified_Time', label: 'Modified Time', group: 'System' },
-  { value: '__custom__', label: '— Custom / API name —', group: '' }
-];
-
-/* ============================================================
-   UTILITIES
-   ============================================================ */
-function escapeHtml(s) {
-  if (s == null) return '';
-  const div = document.createElement('div');
-  div.textContent = String(s);
-  return div.innerHTML;
+  --topbar-h: 56px;
+  --footer-h: 26px;
+  --col-left-w: 320px;
 }
 
-function showToast(msg, type = '') {
-  toastEl.className = 'toast';
-  if (type) toastEl.classList.add('is-' + type);
-  toastEl.textContent = msg;
-  toastEl.classList.remove('hidden');
-  setTimeout(() => toastEl.classList.add('hidden'), 3500);
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
 }
 
-function setTime() {
-  const now = new Date();
-  prevTime.textContent = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+.hidden { display: none !important; }
+
+.tmpl-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100%;
 }
 
 /* ============================================================
-   TEMPLATE LIST
+   TOPBAR
    ============================================================ */
-async function fetchTemplates() {
-  try {
-    const req = {
-      parameters: {},
-      headers: { Authorization: 'Bearer ' + AISENSY_TOKEN },
-      method: 'GET',
-      url: 'https://backend.aisensy.com/direct-apis/t1/get-templates'
-    };
-    const resp = await ZOHO.CRM.HTTP.get(req);
-    const parsed = typeof resp === 'string' ? JSON.parse(resp) : resp;
-    return parsed?.data || [];
-  } catch (e) {
-    console.error('fetchTemplates failed', e);
-    return [];
-  }
+.global-topbar {
+  height: var(--topbar-h);
+  background: linear-gradient(180deg, var(--clotus-primary) 0%, var(--clotus-primary-dark) 100%);
+  color: #FFFFFF;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  gap: 16px;
+  box-shadow: 0 2px 12px rgba(30, 42, 94, 0.20);
+  z-index: 10;
+  flex-shrink: 0;
 }
 
-function renderTemplateList() {
-  const filtered = allTemplates.filter(t => {
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      const body = t.components?.find(c => c.type === 'BODY')?.text || '';
-      if (!t.name?.toLowerCase().includes(term) && !body.toLowerCase().includes(term)) return false;
-    }
-    if (filterStatus !== 'all' && (t.status || '').toUpperCase() !== filterStatus) return false;
-    return true;
-  });
+.brand { display: flex; align-items: center; gap: 12px; }
 
-  templateCountEl.textContent = filtered.length;
-
-  if (filtered.length === 0) {
-    templateListEl.innerHTML = '<div class="list-empty"><i class="fa-regular fa-folder-open" style="font-size:24px;color:var(--text-faint)"></i><span>No templates match this filter.</span></div>';
-    return;
-  }
-
-  templateListEl.innerHTML = '';
-  filtered.forEach(t => {
-    const row = document.createElement('div');
-    row.className = 'template-row';
-    if (activeTemplateId === t.id) row.classList.add('active');
-    row.dataset.id = t.id;
-
-    const status = (t.status || 'PENDING').toUpperCase();
-    const body = t.components?.find(c => c.type === 'BODY')?.text || '';
-    const preview = (body.length > 60 ? body.substring(0, 60) + '…' : body).replace(/\s+/g, ' ');
-
-    row.innerHTML = `
-      <div class="template-row-top">
-        <span class="template-name">${escapeHtml(t.name)}</span>
-        <span class="status-pill status-pill--${status}">${status}</span>
-      </div>
-      <div class="template-preview">${escapeHtml(preview)}</div>
-      <div class="template-meta">
-        <span>${escapeHtml((t.category || '').toUpperCase())}</span>
-        <span>·</span>
-        <span>${escapeHtml(t.language || '')}</span>
-      </div>
-    `;
-    row.addEventListener('click', () => viewTemplate(t));
-    templateListEl.appendChild(row);
-  });
+.brand-mark {
+  width: 36px; height: 36px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--clotus-accent) 0%, var(--clotus-highlight) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: #FFFFFF;
+  box-shadow: 0 4px 12px rgba(0, 180, 230, 0.3);
 }
 
-async function refreshList() {
-  allTemplates = await fetchTemplates();
-  renderTemplateList();
+.brand-text { display: flex; flex-direction: column; }
+.brand-title { font-size: 15px; font-weight: 700; line-height: 1.1; }
+.brand-sub { font-size: 11px; color: rgba(255, 255, 255, 0.65); letter-spacing: 0.02em; }
+
+.topbar-spacer { flex: 1; }
+.topbar-actions { display: flex; gap: 8px; }
+
+.topbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  color: #FFFFFF;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+
+.topbar-btn:hover {
+  background: var(--clotus-accent);
+  border-color: var(--clotus-accent);
+}
+
+.topbar-btn--primary {
+  background: var(--clotus-accent);
+  border-color: var(--clotus-accent);
+}
+
+.topbar-btn--primary:hover {
+  background: var(--clotus-highlight);
+  border-color: var(--clotus-highlight);
 }
 
 /* ============================================================
-   VIEW EXISTING TEMPLATE (read-only)
+   BODY LAYOUT
    ============================================================ */
-function viewTemplate(t) {
-  activeTemplateId = t.id;
-  isReadOnly = true;
-  document.querySelectorAll('.template-row').forEach(r =>
-    r.classList.toggle('active', r.dataset.id === t.id)
-  );
+.tmpl-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: var(--col-left-w) 1fr;
+  min-height: 0;
+}
 
-  editorEmptyEl.classList.add('hidden');
-  editorShellEl.classList.remove('hidden');
-  editorTitleEl.textContent = t.name;
+.col {
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
 
-  const status = (t.status || 'PENDING').toUpperCase();
-  editorStatusEl.className = 'status-pill status-pill--' + status;
-  editorStatusEl.textContent = status;
+.col-editor { border-right: none; background: var(--bg); }
 
-  // Populate fields
-  fName.value = t.name || '';
-  fName.disabled = true;
-  fCategory.value = (t.category || 'UTILITY').toUpperCase();
-  fLanguage.value = t.language || 'en_US';
+/* ============================================================
+   LEFT — TEMPLATE LIST
+   ============================================================ */
+.list-header {
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
 
-  // Header
-  const header = t.components?.find(c => c.type === 'HEADER');
-  const headerType = header?.format || 'NONE';
-  document.querySelectorAll('input[name="headerType"]').forEach(r => r.checked = r.value === headerType);
-  if (headerType === 'TEXT') fHeaderText.value = header?.text || '';
-  updateHeaderVisibility(headerType);
+.list-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
 
-  // Body
-  const bodyComp = t.components?.find(c => c.type === 'BODY');
-  fBody.value = bodyComp?.text || '';
+.list-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
 
-  // Footer
-  const footerComp = t.components?.find(c => c.type === 'FOOTER');
-  fFooter.value = footerComp?.text || '';
+.conv-count {
+  background: var(--clotus-primary-pale);
+  color: var(--clotus-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
 
-  // Buttons
-  const buttonsComp = t.components?.find(c => c.type === 'BUTTONS');
-  buttons = [];
-  let btnType = 'NONE';
-  if (buttonsComp?.buttons?.length) {
-    const first = buttonsComp.buttons[0];
-    btnType = first.type === 'QUICK_REPLY' ? 'QUICK_REPLY' : 'CTA';
-    buttons = buttonsComp.buttons.map(b => ({
-      type: b.type,
-      text: b.text || '',
-      value: b.phone_number || b.url || ''
-    }));
-  }
-  document.querySelectorAll('input[name="buttonType"]').forEach(r => r.checked = r.value === btnType);
-  updateButtonVisibility(btnType);
-  renderButtons();
+.list-search {
+  position: relative;
+  margin-bottom: 8px;
+}
 
-  // Disable editing for existing templates
-  [fName, fCategory, fLanguage, fBody, fFooter, fHeaderText].forEach(el => el.disabled = true);
-  document.querySelectorAll('input[name="headerType"], input[name="buttonType"]').forEach(r => r.disabled = true);
-  addButtonBtn.disabled = true;
-  submitBtn.classList.add('hidden');
-  cancelBtn.textContent = 'Close';
+.list-search i {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-faint);
+  font-size: 12px;
+  pointer-events: none;
+}
 
-  refreshVarInputs();
-  updateAllCounts();
-  updatePreview();
-  // Expand all sections so the full template is visible
-  document.querySelectorAll('.accordion').forEach(card => card.classList.add('is-open'));
-  updateAccordionStatuses();
+#templateSearchInput {
+  width: 100%;
+  padding: 8px 10px 8px 30px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  border-radius: 8px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: var(--text);
+  transition: all 0.18s;
+}
+
+#templateSearchInput:focus {
+  outline: none;
+  background: var(--surface);
+  border-color: var(--clotus-accent);
+  box-shadow: 0 0 0 3px rgba(0, 180, 230, 0.12);
+}
+
+.list-filters {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+}
+
+.list-filters::-webkit-scrollbar { display: none; }
+
+.chip {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.chip:hover {
+  background: var(--clotus-accent-pale);
+  border-color: var(--clotus-accent);
+  color: var(--clotus-primary);
+}
+
+.chip.chip-active {
+  background: var(--clotus-primary);
+  border-color: var(--clotus-primary);
+  color: #FFFFFF;
+}
+
+.lead-list {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--surface);
+}
+
+.lead-list::-webkit-scrollbar { width: 6px; }
+.lead-list::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+
+.template-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s;
+  border-left: 3px solid transparent;
+}
+
+.template-row:hover { background: var(--surface-2); }
+
+.template-row.active {
+  background: var(--clotus-accent-pale);
+  border-left-color: var(--clotus-accent);
+}
+
+.template-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.template-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.template-preview {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.template-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+}
+
+.status-pill {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 9px;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.status-pill--APPROVED { background: rgba(16, 185, 129, 0.15); color: #047857; }
+.status-pill--PENDING { background: rgba(245, 158, 11, 0.15); color: #B45309; }
+.status-pill--REJECTED { background: rgba(239, 68, 68, 0.15); color: #B91C1C; }
+.status-pill--draft { background: rgba(160, 164, 186, 0.20); color: var(--text-muted); }
+
+.list-loading,
+.list-empty {
+  padding: 40px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-faint);
+  font-size: 12px;
+  text-align: center;
+}
+
+.spinner-lg {
+  width: 28px; height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--clotus-accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ============================================================
+   EDITOR EMPTY STATE
+   ============================================================ */
+.editor-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px;
+  text-align: center;
+  color: var(--text-faint);
+}
+
+.editor-empty-icon {
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  background: var(--clotus-primary-pale);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  color: var(--clotus-primary-light);
+  margin-bottom: 10px;
+}
+
+.editor-empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.editor-empty-sub {
+  font-size: 13px;
+  color: var(--text-faint);
+  max-width: 420px;
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+.primary-cta:hover {
+  background: var(--clotus-accent);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.primary-cta:disabled {
+  background: var(--text-faint);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.ghost-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
 }
 
 /* ============================================================
-   NEW TEMPLATE
+   EDITOR SHELL
    ============================================================ */
-function newTemplate() {
-  activeTemplateId = null;
-  isReadOnly = false;
-  document.querySelectorAll('.template-row').forEach(r => r.classList.remove('active'));
-
-  editorEmptyEl.classList.add('hidden');
-  editorShellEl.classList.remove('hidden');
-  editorTitleEl.textContent = 'New template';
-  editorStatusEl.className = 'status-pill status-pill--draft';
-  editorStatusEl.textContent = 'Draft';
-
-  // Reset form
-  fName.value = '';
-  fName.disabled = false;
-  fCategory.value = 'UTILITY';
-  fLanguage.value = 'en_US';
-  fBody.value = '';
-  fFooter.value = '';
-  fHeaderText.value = '';
-  document.querySelector('input[name="headerType"][value="NONE"]').checked = true;
-  document.querySelector('input[name="buttonType"][value="NONE"]').checked = true;
-  buttons = [];
-  varSamples = {};
-  varCrmFields = {};
-  clearUpload();
-
-  // Enable
-  [fName, fCategory, fLanguage, fBody, fFooter, fHeaderText].forEach(el => el.disabled = false);
-  document.querySelectorAll('input[name="headerType"], input[name="buttonType"]').forEach(r => r.disabled = false);
-  addButtonBtn.disabled = false;
-  submitBtn.classList.remove('hidden');
-  cancelBtn.textContent = 'Cancel';
-
-  updateHeaderVisibility('NONE');
-  updateButtonVisibility('NONE');
-  renderButtons();
-  refreshVarInputs();
-  updateAllCounts();
-  clearErrors();
-  updatePreview();
-  resetAccordion();
-  updateAccordionStatuses();
+.editor-shell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
-function closeEditor() {
-  editorEmptyEl.classList.remove('hidden');
-  editorShellEl.classList.add('hidden');
-  activeTemplateId = null;
-  document.querySelectorAll('.template-row').forEach(r => r.classList.remove('active'));
+.editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.editor-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.editor-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.editor-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.primary-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  background: var(--clotus-primary);
+  color: #FFFFFF;
+  border: none;
+  border-radius: 7px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s;
+  box-shadow: var(--shadow-sm);
+  white-space: nowrap;
+}
+
+.ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 12px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.editor-content {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 16px;
+  padding: 16px;
+  overflow: hidden;
+  min-height: 0;
 }
 
 /* ============================================================
-   HEADER / BUTTON VISIBILITY
+   FORM PANE
    ============================================================ */
-function updateHeaderVisibility(type) {
-  gHeaderText.classList.toggle('hidden', type !== 'TEXT');
-  gHeaderMedia.classList.toggle('hidden', !['IMAGE', 'VIDEO', 'DOCUMENT'].includes(type));
+.form-pane {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+  min-width: 0;
+}
 
-  // Configure file accept + size hint based on type
-  if (type === 'IMAGE') {
-    mediaFile.accept = 'image/jpeg,image/png';
-    uploadHint.textContent = 'JPG or PNG · max 5 MB';
-  } else if (type === 'VIDEO') {
-    mediaFile.accept = 'video/mp4,video/3gpp';
-    uploadHint.textContent = 'MP4 or 3GP · max 16 MB';
-  } else if (type === 'DOCUMENT') {
-    mediaFile.accept = 'application/pdf';
-    uploadHint.textContent = 'PDF · max 100 MB';
-  }
-  // Reset upload when switching header type
-  if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(type)) {
-    clearUpload();
-  }
+.form-pane::-webkit-scrollbar { width: 6px; }
+.form-pane::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+
+.form-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: box-shadow 0.15s;
+}
+
+.form-card.accordion.is-open {
+  box-shadow: var(--shadow-md);
+}
+
+.form-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid transparent;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 0;
+  font-family: inherit;
+}
+
+.accordion-toggle {
+  border: none;
+  outline: none;
+}
+
+.accordion-toggle:hover {
+  background: var(--surface-2);
+}
+
+.form-card.accordion.is-open .form-card-head {
+  background: var(--clotus-primary-pale);
+  border-bottom-color: var(--border);
+}
+
+.step-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--clotus-primary);
+  color: #FFFFFF;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.form-card.accordion.is-open .step-num {
+  background: var(--clotus-accent);
+}
+
+.form-card-head-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.form-card-head h3 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 1px;
+  line-height: 1.2;
+}
+
+.form-card-head p {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.form-card-head .optional {
+  font-size: 9.5px;
+  color: var(--text-faint);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-left: 4px;
+}
+
+.form-card-head code {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  background: var(--surface-2);
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: var(--clotus-primary);
+}
+
+.accordion-status {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-weight: 600;
+  flex-shrink: 0;
+  white-space: nowrap;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.accordion-status.has-value {
+  color: var(--clotus-accent-dark);
+}
+
+.accordion-chevron {
+  color: var(--text-muted);
+  font-size: 10px;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.form-card.accordion.is-open .accordion-chevron {
+  transform: rotate(180deg);
+  color: var(--clotus-primary);
+}
+
+.accordion-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease, padding 0.3s ease;
+  padding: 0 14px;
+}
+
+.form-card.accordion.is-open .accordion-body {
+  max-height: 9999px;
+  padding: 12px 14px 14px;
+}
+
+.form-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.field-group label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.req {
+  color: var(--danger);
+  margin-left: 2px;
+}
+
+.field-group input[type="text"],
+.field-group textarea,
+.field-group select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--surface);
+  transition: all 0.15s;
+}
+
+.field-group textarea {
+  resize: vertical;
+  min-height: 80px;
+  font-family: var(--font-sans);
+  line-height: 1.5;
+}
+
+.field-group input:focus,
+.field-group textarea:focus,
+.field-group select:focus {
+  outline: none;
+  border-color: var(--clotus-accent);
+  box-shadow: 0 0 0 3px rgba(0, 180, 230, 0.12);
+}
+
+.field-help {
+  font-size: 11px;
+  color: var(--text-faint);
+  line-height: 1.4;
+}
+
+.field-help code {
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--clotus-primary);
+}
+
+.field-error {
+  font-size: 11.5px;
+  color: var(--danger);
+  font-weight: 600;
+  display: none;
+}
+
+.field-error.show { display: block; }
+
+.field-group.has-error input,
+.field-group.has-error textarea {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+}
+
+.radio-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.radio-card {
+  flex: 1;
+  min-width: 90px;
+  position: relative;
+  cursor: pointer;
+}
+
+.radio-card input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.radio-card span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.radio-card:hover span {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.radio-card input:checked + span {
+  background: var(--clotus-primary);
+  border-color: var(--clotus-primary);
+  color: #FFFFFF;
+}
+
+.radio-card span i { font-size: 11px; }
+
+.formatting-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--clotus-accent-pale);
+  border: 1px solid #BFE9F5;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--clotus-primary);
+}
+
+.formatting-tip i { color: var(--clotus-accent-dark); }
+
+.formatting-tip code {
+  background: rgba(255, 255, 255, 0.7);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.var-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.var-input-row {
+  display: grid;
+  grid-template-columns: 56px 1fr 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.var-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--clotus-primary);
+  font-weight: 700;
+  background: var(--clotus-primary-pale);
+  padding: 9px 8px;
+  border-radius: 6px;
+  text-align: center;
+}
+
+.var-input-row input,
+.var-input-row select {
+  padding: 8px 10px !important;
+  font-size: 12px !important;
+}
+
+.var-input-row select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%235A5F7A'><path d='M7 10l5 5 5-5z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  padding-right: 28px !important;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.var-input-help {
+  grid-column: 2 / span 2;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  padding-left: 4px;
+}
+
+/* ===== Upload box ===== */
+.upload-box {
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  transition: all 0.15s;
+  cursor: pointer;
+  position: relative;
+}
+
+.upload-box:hover,
+.upload-box.dragover {
+  border-color: var(--clotus-accent);
+  background: var(--clotus-accent-pale);
+}
+
+.upload-empty {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+}
+
+.upload-empty i {
+  font-size: 28px;
+  color: var(--clotus-accent-dark);
+  flex-shrink: 0;
+}
+
+.upload-text {
+  font-size: 12.5px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.upload-text strong {
+  color: var(--clotus-primary);
+  font-weight: 700;
+}
+
+.upload-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+
+.upload-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  cursor: default;
+}
+
+.upload-thumb {
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.upload-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.upload-thumb i {
+  font-size: 24px;
+  color: var(--text-faint);
+}
+
+.upload-thumb.is-pdf i { color: #DC2626; }
+.upload-thumb.is-video i { color: #2563EB; }
+
+.upload-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.upload-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.upload-size {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+
+.upload-status {
+  font-size: 11px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.upload-status.uploading { color: var(--clotus-accent-dark); }
+.upload-status.success { color: var(--success); }
+.upload-status.error { color: var(--danger); }
+
+.upload-status .mini-spin {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--border);
+  border-top-color: var(--clotus-accent);
+  border-radius: 50%;
+  display: inline-block;
+  animation: spin 0.8s linear infinite;
+}
+
+/* ===== Buttons builder ===== */
+.btn-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.btn-row {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.btn-row.is-quickreply { grid-template-columns: 1fr auto; }
+
+.btn-row select,
+.btn-row input {
+  padding: 6px 8px !important;
+  font-size: 12px !important;
+}
+
+.btn-remove {
+  width: 26px; height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.btn-remove:hover { color: var(--danger); background: var(--clotus-highlight-pale); }
+
+.add-btn-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  background: transparent;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  width: 100%;
+  justify-content: center;
+}
+
+.add-btn-row:hover {
+  background: var(--clotus-accent-pale);
+  border-color: var(--clotus-accent);
+  color: var(--clotus-primary);
+}
+
+.add-btn-row:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ============================================================
-   MEDIA UPLOAD
+   PREVIEW PANE (sticky right column)
    ============================================================ */
-function clearUpload() {
-  uploadedMedia = null;
-  mediaFile.value = '';
-  uploadEmpty.classList.remove('hidden');
-  uploadPreview.classList.add('hidden');
-  uploadThumb.innerHTML = '';
-  uploadStatus.textContent = '';
-  uploadStatus.className = 'upload-status';
-  updatePreview();
+.preview-pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
-uploadBox?.addEventListener('click', (e) => {
-  if (e.target.closest('#uploadRemove')) return;
-  if (isReadOnly) return;
-  mediaFile.click();
-});
-
-uploadBox?.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  if (isReadOnly) return;
-  uploadBox.classList.add('dragover');
-});
-
-uploadBox?.addEventListener('dragleave', () => uploadBox.classList.remove('dragover'));
-
-uploadBox?.addEventListener('drop', (e) => {
-  e.preventDefault();
-  uploadBox.classList.remove('dragover');
-  if (isReadOnly) return;
-  const file = e.dataTransfer?.files?.[0];
-  if (file) handleMediaFile(file);
-});
-
-mediaFile?.addEventListener('change', (e) => {
-  const file = e.target.files?.[0];
-  if (file) handleMediaFile(file);
-});
-
-uploadRemove?.addEventListener('click', (e) => {
-  e.stopPropagation();
-  clearUpload();
-});
-
-function fmtSize(bytes) {
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+.preview-sticky {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: sticky;
+  top: 0;
 }
 
-async function handleMediaFile(file) {
-  // Validate
-  const headerType = document.querySelector('input[name="headerType"]:checked')?.value;
-  const limits = { IMAGE: 5, VIDEO: 16, DOCUMENT: 100 };
-  const limit = limits[headerType] || 5;
-  if (file.size > limit * 1024 * 1024) {
-    showToast(`File exceeds ${limit} MB limit for ${headerType}`, 'error');
-    return;
-  }
-
-  uploadedMedia = { name: file.name, size: file.size, mimeType: file.type, file };
-
-  // Show preview
-  uploadEmpty.classList.add('hidden');
-  uploadPreview.classList.remove('hidden');
-  uploadName.textContent = file.name;
-  uploadSize.textContent = fmtSize(file.size);
-
-  uploadThumb.className = 'upload-thumb';
-  uploadThumb.innerHTML = '';
-  if (headerType === 'IMAGE') {
-    const reader = new FileReader();
-    reader.onload = e => {
-      uploadThumb.innerHTML = `<img src="${e.target.result}" alt="">`;
-      uploadedMedia.dataUrl = e.target.result;
-      updatePreview();
-    };
-    reader.readAsDataURL(file);
-  } else if (headerType === 'VIDEO') {
-    uploadThumb.classList.add('is-video');
-    uploadThumb.innerHTML = '<i class="fa-solid fa-video"></i>';
-  } else if (headerType === 'DOCUMENT') {
-    uploadThumb.classList.add('is-pdf');
-    uploadThumb.innerHTML = '<i class="fa-solid fa-file-pdf"></i>';
-  }
-
-  updatePreview();
-
-  // Upload to AiSensy
-  uploadStatus.className = 'upload-status uploading';
-  uploadStatus.innerHTML = '<span class="mini-spin"></span> Uploading to AiSensy…';
-
-  try {
-    const result = await uploadMediaToAisensy(file);
-    if (result?.id || result?.handle) {
-      uploadedMedia.handle = result.id || result.handle;
-      uploadStatus.className = 'upload-status success';
-      uploadStatus.innerHTML = '<i class="fa-solid fa-circle-check"></i> Uploaded · ready for submission';
-      updateAccordionStatuses();
-    } else {
-      throw new Error('No media handle returned');
-    }
-  } catch (err) {
-    console.error('Upload failed', err);
-    uploadStatus.className = 'upload-status error';
-    uploadStatus.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Upload failed — ' + (err.message || 'see console');
-    uploadedMedia.handle = null;
-  }
+.preview-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
-async function uploadMediaToAisensy(file) {
-  // Convert to base64 because ZOHO.CRM.HTTP doesn't support FormData easily
-  // Instead, use direct fetch (requires CORS to be open on AiSensy side)
-  const fd = new FormData();
-  fd.append('file', file);
-
-  const resp = await fetch('https://backend.aisensy.com/direct-apis/t1/media', {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + AISENSY_TOKEN },
-    body: fd
-  });
-  if (!resp.ok) throw new Error('HTTP ' + resp.status);
-  return resp.json();
+.phone-frame {
+  background: #2A2A2A;
+  border-radius: 24px;
+  padding: 6px;
+  box-shadow: 0 20px 50px rgba(30, 42, 94, 0.25), 0 8px 16px rgba(0, 0, 0, 0.15);
+  position: relative;
+  overflow: hidden;
+  max-width: 280px;
+  margin: 0 auto;
+  width: 100%;
 }
 
-function updateButtonVisibility(type) {
-  gButtons.classList.toggle('hidden', type === 'NONE');
-  if (type === 'NONE') {
-    buttons = [];
-    renderButtons();
-    return;
-  }
-  // Initialize at least one button
-  if (buttons.length === 0) {
-    if (type === 'QUICK_REPLY') {
-      buttons.push({ type: 'QUICK_REPLY', text: '', value: '' });
-    } else {
-      buttons.push({ type: 'URL', text: '', value: '' });
-    }
-  } else {
-    // Reset to first matching type
-    if (type === 'QUICK_REPLY') {
-      buttons = buttons.filter(b => b.type === 'QUICK_REPLY');
-      if (buttons.length === 0) buttons.push({ type: 'QUICK_REPLY', text: '', value: '' });
-    } else {
-      buttons = buttons.filter(b => b.type !== 'QUICK_REPLY');
-      if (buttons.length === 0) buttons.push({ type: 'URL', text: '', value: '' });
-    }
-  }
-  renderButtons();
+.phone-notch {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80px;
+  height: 14px;
+  background: #2A2A2A;
+  border-bottom-left-radius: 10px;
+  border-bottom-right-radius: 10px;
+  z-index: 2;
+}
+
+.phone-screen {
+  background: var(--wa-bg);
+  border-radius: 18px;
+  overflow: hidden;
+  min-height: 460px;
+  display: flex;
+  flex-direction: column;
+}
+
+.phone-statusbar {
+  background: #075E54;
+  color: white;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 16px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.phone-icons { display: flex; gap: 6px; font-size: 9.5px; }
+
+.phone-chat-header {
+  background: #075E54;
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px 10px;
+  font-size: 12px;
+}
+
+.phone-avatar {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--clotus-accent) 0%, var(--clotus-highlight) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+  color: white;
+}
+
+.phone-name {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.phone-name-1 { font-weight: 600; font-size: 12.5px; }
+.phone-name-2 { font-size: 10px; opacity: 0.85; }
+
+.phone-call-icon { font-size: 12px; opacity: 0.9; }
+
+.phone-chat-body {
+  flex: 1;
+  padding: 14px 10px;
+  background-image:
+    radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.4) 0%, transparent 30%),
+    radial-gradient(circle at 80% 70%, rgba(255, 255, 255, 0.3) 0%, transparent 30%),
+    var(--wa-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+}
+
+.phone-bubble {
+  align-self: flex-start;
+  max-width: 88%;
+  background: #FFFFFF;
+  border-radius: 8px;
+  padding: 6px 8px 4px;
+  box-shadow: 0 1px 0.5px rgba(0, 0, 0, 0.13);
+  position: relative;
+  border-top-left-radius: 0;
+}
+
+.phone-bubble::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -8px;
+  width: 8px;
+  height: 13px;
+  background: white;
+  clip-path: polygon(100% 0, 0 0, 100% 100%);
+}
+
+.phone-header {
+  font-weight: 700;
+  font-size: 12.5px;
+  color: #303030;
+  margin-bottom: 4px;
+  line-height: 1.3;
+}
+
+.phone-header img,
+.phone-header video {
+  display: block;
+  width: 100%;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  background: #f0f0f0;
+}
+
+.phone-header.is-media {
+  background: #DDDDDD;
+  border-radius: 4px;
+  height: 130px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 6px;
+  color: #888;
+  font-size: 11px;
+}
+
+.phone-header.is-media i { font-size: 28px; }
+
+.phone-body {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #303030;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  min-height: 18px;
+}
+
+.phone-body b { font-weight: 700; }
+.phone-body i { font-style: italic; }
+.phone-body s { text-decoration: line-through; }
+.phone-body code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: #F0F0F0;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.phone-body .preview-var {
+  background: rgba(0, 180, 230, 0.15);
+  border-radius: 3px;
+  padding: 0 3px;
+  color: var(--clotus-primary);
+  font-weight: 500;
+}
+
+.phone-footer {
+  font-size: 10.5px;
+  color: #888;
+  margin-top: 4px;
+}
+
+.phone-time-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 3px;
+  font-size: 9.5px;
+  color: #999;
+  margin-top: 2px;
+}
+
+.phone-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 4px;
+}
+
+.phone-button {
+  background: #FFFFFF;
+  color: #00A5F4;
+  text-align: center;
+  padding: 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-shadow: 0 1px 0.5px rgba(0, 0, 0, 0.13);
+}
+
+.phone-button i { font-size: 11px; }
+
+.preview-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.preview-hint i { color: var(--clotus-accent-dark); margin-top: 1px; flex-shrink: 0; }
+
+/* ============================================================
+   TOAST
+   ============================================================ */
+.toast {
+  position: fixed;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--clotus-primary);
+  color: white;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--shadow-lg);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  animation: slideUp 0.3s ease;
+}
+
+.toast.is-success { background: var(--success); }
+.toast.is-error { background: var(--danger); }
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translate(-50%, 20px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
 }
 
 /* ============================================================
-   BUTTON BUILDER
+   FOOTER
    ============================================================ */
-function renderButtons() {
-  btnList.innerHTML = '';
-  const btnType = document.querySelector('input[name="buttonType"]:checked')?.value;
-
-  buttons.forEach((btn, idx) => {
-    const row = document.createElement('div');
-    row.className = 'btn-row' + (btn.type === 'QUICK_REPLY' ? ' is-quickreply' : '');
-
-    if (btn.type === 'QUICK_REPLY') {
-      row.innerHTML = `
-        <input type="text" data-field="text" data-idx="${idx}" placeholder="Button text (max 25 chars)" maxlength="25" value="${escapeHtml(btn.text)}">
-        <button class="btn-remove" data-idx="${idx}" title="Remove" type="button"><i class="fa-solid fa-trash-can"></i></button>
-      `;
-    } else {
-      row.innerHTML = `
-        <select data-field="type" data-idx="${idx}">
-          <option value="URL" ${btn.type === 'URL' ? 'selected' : ''}>URL</option>
-          <option value="PHONE_NUMBER" ${btn.type === 'PHONE_NUMBER' ? 'selected' : ''}>Phone</option>
-        </select>
-        <input type="text" data-field="text" data-idx="${idx}" placeholder="Button text" maxlength="25" value="${escapeHtml(btn.text)}">
-        <input type="text" data-field="value" data-idx="${idx}" placeholder="${btn.type === 'URL' ? 'https://…' : '+91…'}" value="${escapeHtml(btn.value)}">
-        <button class="btn-remove" data-idx="${idx}" title="Remove" type="button"><i class="fa-solid fa-trash-can"></i></button>
-      `;
-    }
-    btnList.appendChild(row);
-  });
-
-  // Hint about limits
-  const max = btnType === 'QUICK_REPLY' ? 3 : 2;
-  buttonLimitHint.textContent = `${buttons.length}/${max} buttons. ${btnType === 'QUICK_REPLY' ? 'Up to 3 quick reply buttons.' : 'Up to 2 CTA buttons (max 1 phone + 1 URL).'}`;
-  addButtonBtn.disabled = buttons.length >= max || isReadOnly;
-
-  // Wire up inputs
-  btnList.querySelectorAll('input, select').forEach(el => {
-    el.addEventListener('input', e => {
-      const idx = +e.target.dataset.idx;
-      const field = e.target.dataset.field;
-      buttons[idx][field] = e.target.value;
-      // For CTA, when phone is selected, also flip the value placeholder
-      if (field === 'type') {
-        renderButtons();
-      }
-      updatePreview();
-    });
-  });
-
-  btnList.querySelectorAll('.btn-remove').forEach(el => {
-    el.addEventListener('click', e => {
-      const idx = +e.currentTarget.dataset.idx;
-      buttons.splice(idx, 1);
-      renderButtons();
-      updatePreview();
-      updateAccordionStatuses();
-    });
-  });
-
-  updatePreview();
-  updateAccordionStatuses();
+.appfooter {
+  height: var(--footer-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
-addButtonBtn?.addEventListener('click', () => {
-  const btnType = document.querySelector('input[name="buttonType"]:checked')?.value;
-  if (btnType === 'QUICK_REPLY' && buttons.length < 3) {
-    buttons.push({ type: 'QUICK_REPLY', text: '', value: '' });
-  } else if (btnType === 'CTA' && buttons.length < 2) {
-    // Default new CTA button: URL unless one URL already exists
-    const hasUrl = buttons.some(b => b.type === 'URL');
-    buttons.push({ type: hasUrl ? 'PHONE_NUMBER' : 'URL', text: '', value: '' });
-  }
-  renderButtons();
-});
-
-/* ============================================================
-   VARIABLE DETECTION & SAMPLES
-   ============================================================ */
-function extractVars(text) {
-  const vars = new Set();
-  const re = /\{\{(\d+)\}\}/g;
-  let m;
-  while ((m = re.exec(text || '')) !== null) vars.add(m[1]);
-  return Array.from(vars).sort((a, b) => +a - +b);
+.powered-link {
+  color: var(--clotus-primary);
+  text-decoration: none;
+  font-weight: 600;
 }
 
-function refreshVarInputs() {
-  const vars = extractVars(fBody.value + ' ' + fHeaderText.value);
-  if (vars.length === 0) {
-    gVars.classList.add('hidden');
-    varInputs.innerHTML = '';
-    return;
-  }
-  gVars.classList.remove('hidden');
-  varInputs.innerHTML = '';
-
-  // Build grouped select HTML once
-  const optgroups = {};
-  LEAD_FIELDS.forEach(f => {
-    if (!f.value || f.value === '__custom__') {
-      (optgroups[''] = optgroups[''] || []).push(f);
-    } else {
-      (optgroups[f.group] = optgroups[f.group] || []).push(f);
-    }
-  });
-  let selectHtml = '';
-  // Empty option first
-  selectHtml += `<option value="">Pick CRM field…</option>`;
-  Object.entries(optgroups).forEach(([g, fields]) => {
-    if (!g) return; // skip the placeholder bucket
-    selectHtml += `<optgroup label="${escapeHtml(g)}">`;
-    fields.forEach(f => {
-      selectHtml += `<option value="${escapeHtml(f.value)}">${escapeHtml(f.label)}</option>`;
-    });
-    selectHtml += `</optgroup>`;
-  });
-  selectHtml += `<option value="__custom__">— Custom / Other API name —</option>`;
-
-  vars.forEach(v => {
-    const row = document.createElement('div');
-    row.className = 'var-input-row';
-    const mapped = varCrmFields[v] || '';
-    const isCustom = mapped && !LEAD_FIELDS.some(f => f.value === mapped);
-    const selectValue = isCustom ? '__custom__' : mapped;
-
-    row.innerHTML = `
-      <span class="var-label">{{${v}}}</span>
-      <select data-var="${v}" data-role="crmfield">
-        ${selectHtml}
-      </select>
-      <input type="text" data-var="${v}" data-role="sample" placeholder="Sample value for preview" value="${escapeHtml(varSamples[v] || '')}">
-    `;
-    varInputs.appendChild(row);
-
-    // Set the selected option after the row is in the DOM
-    const sel = row.querySelector('select');
-    sel.value = selectValue;
-
-    // If custom, show a second row with text input for API name
-    if (isCustom) {
-      const customRow = document.createElement('div');
-      customRow.className = 'var-input-row';
-      customRow.innerHTML = `
-        <span></span>
-        <input type="text" data-var="${v}" data-role="customfield" placeholder="Custom field API name e.g. Lead_Source" value="${escapeHtml(mapped)}">
-        <span></span>
-      `;
-      varInputs.appendChild(customRow);
-    }
-  });
-
-  varInputs.querySelectorAll('select[data-role="crmfield"]').forEach(el => {
-    el.addEventListener('change', e => {
-      const v = e.target.dataset.var;
-      const val = e.target.value;
-      if (val === '__custom__') {
-        varCrmFields[v] = ''; // wait for custom input
-      } else {
-        varCrmFields[v] = val;
-      }
-      refreshVarInputs(); // re-render to show/hide custom input
-    });
-  });
-
-  varInputs.querySelectorAll('input[data-role="sample"]').forEach(el => {
-    el.addEventListener('input', e => {
-      varSamples[e.target.dataset.var] = e.target.value;
-      updatePreview();
-    });
-  });
-
-  varInputs.querySelectorAll('input[data-role="customfield"]').forEach(el => {
-    el.addEventListener('input', e => {
-      varCrmFields[e.target.dataset.var] = e.target.value.trim();
-    });
-  });
+.powered-link:hover {
+  color: var(--clotus-accent-dark);
+  text-decoration: underline;
 }
 
 /* ============================================================
-   COUNTS
+   RESPONSIVE
    ============================================================ */
-function updateAllCounts() {
-  bodyCount.textContent = (fBody.value || '').length;
-  footerCount.textContent = (fFooter.value || '').length;
-  headerTextCount.textContent = (fHeaderText.value || '').length;
+@media (max-width: 1400px) {
+  .editor-content {
+    grid-template-columns: minmax(0, 1fr) 290px;
+    gap: 14px;
+    padding: 14px;
+  }
+  .phone-frame { max-width: 260px; }
 }
 
-/* ============================================================
-   WHATSAPP MARKDOWN
-   ============================================================ */
-function renderWhatsAppMarkdown(text) {
-  if (!text) return '';
-  let html = escapeHtml(text);
-  // *bold*
-  html = html.replace(/\*([^\*\n]+)\*/g, '<b>$1</b>');
-  // _italic_
-  html = html.replace(/_([^_\n]+)_/g, '<i>$1</i>');
-  // ~strike~
-  html = html.replace(/~([^~\n]+)~/g, '<s>$1</s>');
-  // ```mono```
-  html = html.replace(/```([^`]+)```/g, '<code>$1</code>');
-  // {{1}} variables → use sample or stay as placeholder
-  html = html.replace(/\{\{(\d+)\}\}/g, (_, n) => {
-    const v = varSamples[n];
-    return v ? `<span class="preview-var">${escapeHtml(v)}</span>` : `<span class="preview-var">{{${n}}}</span>`;
-  });
-  // Newlines → <br>
-  html = html.replace(/\n/g, '<br>');
-  return html;
+@media (max-width: 1200px) {
+  :root { --col-left-w: 280px; }
+  .editor-content {
+    grid-template-columns: minmax(0, 1fr) 260px;
+    gap: 12px;
+  }
+  .phone-frame { max-width: 240px; }
+  .phone-screen { min-height: 420px; }
 }
 
-/* ============================================================
-   PREVIEW
-   ============================================================ */
-function updatePreview() {
-  const headerType = document.querySelector('input[name="headerType"]:checked')?.value || 'NONE';
-  const btnType = document.querySelector('input[name="buttonType"]:checked')?.value || 'NONE';
-
-  // Header
-  if (headerType === 'NONE') {
-    prevHeader.classList.add('hidden');
-  } else if (headerType === 'TEXT') {
-    prevHeader.classList.remove('hidden');
-    prevHeader.classList.remove('is-media');
-    prevHeader.innerHTML = renderWhatsAppMarkdown(fHeaderText.value || 'Header text');
-  } else {
-    prevHeader.classList.remove('hidden');
-
-    // If we have an actual uploaded image, show it
-    if (headerType === 'IMAGE' && uploadedMedia?.dataUrl) {
-      prevHeader.classList.remove('is-media');
-      prevHeader.innerHTML = `<img src="${uploadedMedia.dataUrl}" alt="">`;
-    } else {
-      prevHeader.classList.add('is-media');
-      const map = {
-        IMAGE: { icon: 'fa-image', label: uploadedMedia?.name || 'Image' },
-        VIDEO: { icon: 'fa-video', label: uploadedMedia?.name || 'Video' },
-        DOCUMENT: { icon: 'fa-file-lines', label: uploadedMedia?.name || 'Document' }
-      };
-      const m = map[headerType];
-      prevHeader.innerHTML = `<i class="fa-regular ${m.icon}"></i><span>${escapeHtml(m.label)}</span>`;
-    }
+@media (max-width: 1024px) {
+  .editor-content {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
   }
-
-  // Body
-  prevBody.innerHTML = renderWhatsAppMarkdown(fBody.value || 'Your message will appear here as you type.');
-
-  // Footer
-  if (fFooter.value) {
-    prevFooter.classList.remove('hidden');
-    prevFooter.textContent = fFooter.value;
-  } else {
-    prevFooter.classList.add('hidden');
+  .preview-pane {
+    order: -1; /* show preview above form on narrow screens */
   }
-
-  // Buttons
-  if (btnType === 'NONE' || buttons.length === 0) {
-    prevButtons.classList.add('hidden');
-    prevButtons.innerHTML = '';
-  } else {
-    prevButtons.classList.remove('hidden');
-    prevButtons.innerHTML = '';
-    buttons.forEach(btn => {
-      const el = document.createElement('div');
-      el.className = 'phone-button';
-      let icon = '';
-      if (btn.type === 'URL') icon = '<i class="fa-solid fa-arrow-up-right-from-square"></i>';
-      else if (btn.type === 'PHONE_NUMBER') icon = '<i class="fa-solid fa-phone"></i>';
-      else icon = '<i class="fa-regular fa-comment-dots"></i>';
-      el.innerHTML = icon + '<span>' + escapeHtml(btn.text || 'Button') + '</span>';
-      prevButtons.appendChild(el);
-    });
-  }
+  .preview-sticky { position: relative; }
+  .phone-frame { max-width: 260px; }
 }
 
-/* ============================================================
-   FORM WIRING
-   ============================================================ */
-fName?.addEventListener('input', () => { clearError('name'); updateAccordionStatuses(); });
-fCategory?.addEventListener('change', updateAccordionStatuses);
-fLanguage?.addEventListener('change', updateAccordionStatuses);
-fBody?.addEventListener('input', () => {
-  updateAllCounts();
-  refreshVarInputs();
-  updatePreview();
-  clearError('body');
-  updateAccordionStatuses();
-});
-fFooter?.addEventListener('input', () => { updateAllCounts(); updatePreview(); updateAccordionStatuses(); });
-fHeaderText?.addEventListener('input', () => { updateAllCounts(); refreshVarInputs(); updatePreview(); updateAccordionStatuses(); });
-
-document.querySelectorAll('input[name="headerType"]').forEach(r => {
-  r.addEventListener('change', e => {
-    updateHeaderVisibility(e.target.value);
-    refreshVarInputs();
-    updatePreview();
-    updateAccordionStatuses();
-  });
-});
-
-document.querySelectorAll('input[name="buttonType"]').forEach(r => {
-  r.addEventListener('change', e => {
-    updateButtonVisibility(e.target.value);
-    updatePreview();
-    updateAccordionStatuses();
-  });
-});
-
-/* ============================================================
-   SEARCH / FILTERS
-   ============================================================ */
-templateSearchInput?.addEventListener('input', e => {
-  searchTerm = e.target.value.trim();
-  renderTemplateList();
-});
-
-chipsEl.forEach(chip => {
-  chip.addEventListener('click', () => {
-    chipsEl.forEach(c => c.classList.remove('chip-active'));
-    chip.classList.add('chip-active');
-    filterStatus = chip.dataset.filter;
-    renderTemplateList();
-  });
-});
-
-refreshListBtn?.addEventListener('click', refreshList);
-newTemplateBtn?.addEventListener('click', newTemplate);
-newTemplateBtn2?.addEventListener('click', newTemplate);
-cancelBtn?.addEventListener('click', closeEditor);
-
-/* ============================================================
-   VALIDATION + SUBMIT
-   ============================================================ */
-function showError(field, msg) {
-  const errEl = document.getElementById('err-' + field);
-  const grpEl = document.getElementById('f-' + field)?.closest('.field-group');
-  if (errEl) {
-    errEl.textContent = msg;
-    errEl.classList.add('show');
-  }
-  if (grpEl) grpEl.classList.add('has-error');
+@media (max-width: 900px) {
+  :root { --col-left-w: 240px; }
 }
 
-function clearError(field) {
-  const errEl = document.getElementById('err-' + field);
-  const grpEl = document.getElementById('f-' + field)?.closest('.field-group');
-  if (errEl) errEl.classList.remove('show');
-  if (grpEl) grpEl.classList.remove('has-error');
-}
-
-function clearErrors() {
-  ['name', 'body'].forEach(clearError);
-}
-
-function validate() {
-  clearErrors();
-  let ok = true;
-
-  const name = fName.value.trim();
-  if (!name) {
-    showError('name', 'Template name is required');
-    ok = false;
-  } else if (!/^[a-z0-9_]+$/.test(name)) {
-    showError('name', 'Use lowercase letters, numbers and underscores only (no spaces or dashes)');
-    ok = false;
+@media (max-width: 768px) {
+  .tmpl-body {
+    grid-template-columns: 1fr;
   }
-
-  const body = fBody.value.trim();
-  if (!body) {
-    showError('body', 'Body is required');
-    ok = false;
+  .col-left {
+    display: none; /* hidden on narrow; could become a drawer */
   }
-
-  // Media header requires upload
-  const headerType = document.querySelector('input[name="headerType"]:checked')?.value;
-  if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-    if (!uploadedMedia?.handle) {
-      showToast(`Upload a sample ${headerType.toLowerCase()} for the header — Meta requires it for approval`, 'error');
-      ok = false;
-    }
-  }
-
-  // CTA buttons need values
-  const btnType = document.querySelector('input[name="buttonType"]:checked')?.value;
-  if (btnType === 'CTA') {
-    for (const b of buttons) {
-      if (!b.text || !b.value) {
-        showToast('Each CTA button needs text and a value (URL or phone)', 'error');
-        ok = false;
-        break;
-      }
-      // URL validation
-      if (b.type === 'URL' && !/^https?:\/\//i.test(b.value)) {
-        showToast(`URL button "${b.text}" must start with https://`, 'error');
-        ok = false;
-        break;
-      }
-    }
-  }
-  if (btnType === 'QUICK_REPLY') {
-    for (const b of buttons) {
-      if (!b.text) {
-        showToast('Each quick-reply button needs text', 'error');
-        ok = false;
-        break;
-      }
-    }
-  }
-
-  return ok;
-}
-
-function buildPayload() {
-  const headerType = document.querySelector('input[name="headerType"]:checked')?.value || 'NONE';
-  const btnType = document.querySelector('input[name="buttonType"]:checked')?.value || 'NONE';
-  const components = [];
-
-  // Header
-  if (headerType === 'TEXT' && fHeaderText.value.trim()) {
-    const headerVars = extractVars(fHeaderText.value);
-    const comp = { type: 'HEADER', format: 'TEXT', text: fHeaderText.value };
-    if (headerVars.length) {
-      comp.example = { header_text: headerVars.map(v => varSamples[v] || `sample_${v}`) };
-    }
-    components.push(comp);
-  } else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-    if (!uploadedMedia?.handle) {
-      // Will be caught by validate(), but build anyway
-      components.push({
-        type: 'HEADER',
-        format: headerType,
-        example: { header_handle: ['PLACEHOLDER_NO_UPLOAD'] }
-      });
-    } else {
-      components.push({
-        type: 'HEADER',
-        format: headerType,
-        example: { header_handle: [uploadedMedia.handle] }
-      });
-    }
-  }
-
-  // Body
-  const bodyVars = extractVars(fBody.value);
-  const bodyComp = { type: 'BODY', text: fBody.value };
-  if (bodyVars.length) {
-    bodyComp.example = { body_text: [bodyVars.map(v => varSamples[v] || `sample_${v}`)] };
-  }
-  components.push(bodyComp);
-
-  // Footer
-  if (fFooter.value.trim()) {
-    components.push({ type: 'FOOTER', text: fFooter.value });
-  }
-
-  // Buttons
-  if (btnType !== 'NONE' && buttons.length) {
-    const cleanedButtons = buttons.map(b => {
-      if (b.type === 'QUICK_REPLY') return { type: 'QUICK_REPLY', text: b.text };
-      if (b.type === 'URL') return { type: 'URL', text: b.text, url: b.value };
-      if (b.type === 'PHONE_NUMBER') return { type: 'PHONE_NUMBER', text: b.text, phone_number: b.value };
-      return null;
-    }).filter(Boolean);
-    components.push({ type: 'BUTTONS', buttons: cleanedButtons });
-  }
-
-  const payload = {
-    name: fName.value.trim(),
-    category: fCategory.value,
-    language: fLanguage.value,
-    components
-  };
-
-  // Include CRM field mapping as metadata (AiSensy may ignore it,
-  // but we'll mirror to the CRM custom module so send-time can use it)
-  if (Object.keys(varCrmFields).length) {
-    payload.crm_field_map = varCrmFields;
-  }
-
-  return payload;
-}
-
-async function submitTemplate() {
-  if (!validate()) return;
-
-  submitBtn.disabled = true;
-  submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting…';
-
-  try {
-    const payload = buildPayload();
-    const req = {
-      url: 'https://backend.aisensy.com/direct-apis/t1/wa_template',
-      headers: {
-        Authorization: 'Bearer ' + AISENSY_TOKEN,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload),
-      parameters: {}
-    };
-    const resp = await ZOHO.CRM.HTTP.post(req);
-    const parsed = typeof resp === 'string' ? JSON.parse(resp) : resp;
-
-    if (parsed?.error || parsed?.errors) {
-      const errMsg = parsed?.error?.message || parsed?.errors?.[0]?.message || 'Submission failed';
-      showToast('Failed: ' + errMsg, 'error');
-      console.error('Template submission error', parsed);
-    } else {
-      showToast('Template submitted for approval', 'success');
-      setTimeout(() => {
-        closeEditor();
-        refreshList();
-      }, 1200);
-    }
-  } catch (e) {
-    console.error('submitTemplate failed', e);
-    showToast('Submission failed. See console for details.', 'error');
-  } finally {
-    submitBtn.disabled = false;
-    submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Submit for approval';
-  }
-}
-
-submitBtn?.addEventListener('click', submitTemplate);
-
-/* ============================================================
-   INIT
-   ============================================================ */
-ZOHO.embeddedApp.on('PageLoad', async () => {
-  setTime();
-  setInterval(setTime, 30000);
-  await refreshList();
-  updatePreview();
-  updateAllCounts();
-  updateAccordionStatuses();
-  wireAccordion();
-});
-
-ZOHO.embeddedApp.init();
-
-/* ============================================================
-   ACCORDION
-   ============================================================ */
-function wireAccordion() {
-  document.querySelectorAll('.accordion-toggle').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      const card = btn.closest('.accordion');
-      card.classList.toggle('is-open');
-    });
-  });
-}
-
-function openAccordion(step) {
-  const card = document.querySelector(`.accordion[data-step="${step}"]`);
-  if (card) card.classList.add('is-open');
-}
-
-function resetAccordion() {
-  document.querySelectorAll('.accordion').forEach((card, idx) => {
-    card.classList.toggle('is-open', idx === 0);
-  });
-}
-
-function updateAccordionStatuses() {
-  // 1. Basics: name + category + language
-  const name = fName.value.trim();
-  setStatus(1, name ? `${name} · ${fCategory.value} · ${fLanguage.value}` : '');
-
-  // 2. Header
-  const headerType = document.querySelector('input[name="headerType"]:checked')?.value;
-  let headerSummary = '';
-  if (headerType === 'TEXT' && fHeaderText.value) headerSummary = 'Text';
-  else if (headerType === 'IMAGE') headerSummary = uploadedMedia?.handle ? '✓ Image' : 'Image';
-  else if (headerType === 'VIDEO') headerSummary = uploadedMedia?.handle ? '✓ Video' : 'Video';
-  else if (headerType === 'DOCUMENT') headerSummary = uploadedMedia?.handle ? '✓ Document' : 'Document';
-  setStatus(2, headerSummary);
-
-  // 3. Body
-  const body = fBody.value.trim();
-  if (body) {
-    const vars = extractVars(body);
-    setStatus(3, vars.length ? `${body.length} chars · ${vars.length} var${vars.length > 1 ? 's' : ''}` : `${body.length} chars`);
-  } else {
-    setStatus(3, '');
-  }
-
-  // 4. Footer
-  setStatus(4, fFooter.value.trim() ? `${fFooter.value.length} chars` : '');
-
-  // 5. Buttons
-  const btnType = document.querySelector('input[name="buttonType"]:checked')?.value;
-  if (btnType === 'QUICK_REPLY') setStatus(5, `${buttons.length} quick reply`);
-  else if (btnType === 'CTA') setStatus(5, `${buttons.length} CTA`);
-  else setStatus(5, '');
-}
-
-function setStatus(step, text) {
-  const el = document.getElementById('status-' + step);
-  if (!el) return;
-  el.textContent = text || '';
-  el.classList.toggle('has-value', !!text);
 }
