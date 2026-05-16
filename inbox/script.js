@@ -66,6 +66,10 @@ const notesEmpty       = document.getElementById('notesEmpty');
 const notesCount       = document.getElementById('notesCount');
 const noteInput        = document.getElementById('noteInput');
 const addNoteBtn       = document.getElementById('addNoteBtn');
+const taskInput        = document.getElementById('taskInput');
+const taskDueDate      = document.getElementById('taskDueDate');
+const taskPriority     = document.getElementById('taskPriority');
+const addTaskBtn       = document.getElementById('addTaskBtn');
 
 /* ---------- STATE ---------- */
 let listFilter = 'all';
@@ -182,22 +186,8 @@ function refreshAllRelativeTimes() {
    LEFT COLUMN — LEAD LIST
    ============================================================ */
 async function fetchConversations() {
-  try {
-    // Strategy: use COQL via Deluge to fetch leads with WA Communications
-    // We'll need a Deluge function: clotus_wa_inbox_list
-    // For now, use existing extension API approach.
-    const req = { "arguments": JSON.stringify({ "limit": 100 }) };
-    const response = await ZOHO.CRM.FUNCTIONS.execute('clotus_wa_inbox_list', req);
-    const parsed = typeof response === 'string' ? JSON.parse(response) : response;
-    if (parsed?.code === 'success') {
-      const data = typeof parsed.details?.output === 'string' ? JSON.parse(parsed.details.output) : parsed.details.output;
-      return data?.conversations || [];
-    }
-  } catch (e) {
-    console.warn('clotus_wa_inbox_list unavailable, falling back to COQL via getRecord', e);
-  }
-
-  // Fallback: pull recent WA Communications and group client-side
+  // Pull all recent WA Communications and aggregate per-lead client-side.
+  // This is the only way to count ALL unread inbound messages (not just the last one).
   try {
     const recs = await ZOHO.CRM.API.getAllRecords({
       Entity: 'aisensypro__WA_Communications',
@@ -208,26 +198,64 @@ async function fetchConversations() {
     });
     const list = typeof recs.data === 'string' ? JSON.parse(recs.data) : recs.data;
     const byLead = new Map();
+
     (list || []).forEach(r => {
       const lead = r.aisensypro__Lead;
       if (!lead?.id) return;
-      const existing = byLead.get(lead.id);
       const ts = r.aisensypro__Date || r.Created_Time;
-      if (!existing || new Date(ts) > new Date(existing.last_at)) {
-        byLead.set(lead.id, {
+      let existing = byLead.get(lead.id);
+
+      if (!existing) {
+        existing = {
           lead_id: lead.id,
           lead_name: lead.name,
           last_at: ts,
           last_preview: r.aisensypro__Message || '[Media]',
           last_type: r.aisensypro__Type,
           last_status: r.aisensypro__Status,
-          phone: r.aisensypro__From === '918986630794' ? r.aisensypro__To : r.aisensypro__From
-        });
+          phone: r.aisensypro__From === '918986630794' ? r.aisensypro__To : r.aisensypro__From,
+          inbound_times: [],
+          has_failed: false
+        };
+        byLead.set(lead.id, existing);
+      }
+
+      // Track ALL inbound messages so we can count unread accurately
+      if (r.aisensypro__Type === 'Incomming') {
+        existing.inbound_times.push(new Date(ts).getTime());
+      }
+      if (r.aisensypro__Status === 'failed') {
+        existing.has_failed = true;
+      }
+
+      // Update "last" if this record is newer
+      if (new Date(ts) > new Date(existing.last_at)) {
+        existing.last_at = ts;
+        existing.last_preview = r.aisensypro__Message || '[Media]';
+        existing.last_type = r.aisensypro__Type;
+        existing.last_status = r.aisensypro__Status;
       }
     });
-    return Array.from(byLead.values()).sort((a, b) => new Date(b.last_at) - new Date(a.last_at));
+
+    // Compute unread_count per lead based on localStorage lastViewedAt
+    const convs = Array.from(byLead.values());
+    convs.forEach(c => {
+      let lastViewed = 0;
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY_PREFIX + c.lead_id);
+        lastViewed = stored ? parseInt(stored, 10) : 0;
+      } catch (e) {}
+      // Count inbound messages newer than lastViewed
+      c.unread_count = c.inbound_times.filter(t => t > lastViewed).length;
+      // If we've never viewed this lead AND there are inbound messages, mark them all as unread
+      if (lastViewed === 0 && c.inbound_times.length > 0) {
+        c.unread_count = c.inbound_times.length;
+      }
+    });
+
+    return convs.sort((a, b) => new Date(b.last_at) - new Date(a.last_at));
   } catch (e) {
-    console.error('Conversation fetch failed', e);
+    console.error('fetchConversations failed', e);
     return [];
   }
 }
@@ -242,7 +270,7 @@ function renderLeadList() {
     }
     if (listFilter === 'unread') return getUnreadCount(c) > 0;
     if (listFilter === 'open') return c.window_open === true;
-    if (listFilter === 'failed') return c.last_status === 'failed';
+    if (listFilter === 'failed') return c.has_failed === true || c.last_status === 'failed';
     return true;
   });
 
@@ -294,15 +322,7 @@ function renderLeadList() {
 }
 
 function getUnreadCount(conv) {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_PREFIX + conv.lead_id);
-    const lastViewed = stored ? parseInt(stored, 10) : 0;
-    const lastAt = new Date(conv.last_at).getTime();
-    if (!stored) return conv.last_type === 'Incomming' ? 1 : 0;
-    return lastAt > lastViewed && conv.last_type === 'Incomming' ? 1 : 0;
-  } catch (e) {
-    return 0;
-  }
+  return conv.unread_count || 0;
 }
 
 async function refreshConversations() {
@@ -375,6 +395,21 @@ function selectLead(leadId) {
   // Restart polling
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = setInterval(() => loadAllMessages(activeLeadData), POLL_INTERVAL_MS);
+
+  // Mark this lead's inbound messages as "viewed" — clears it from the Unread filter
+  setTimeout(() => {
+    try {
+      const now = Date.now();
+      localStorage.setItem(STORAGE_KEY_PREFIX + leadId, String(now));
+      lastViewedAt = now;
+      // Update the in-memory conversation list so the unread badge clears in the left pane
+      const conv = allConversations.find(c => c.lead_id === leadId);
+      if (conv) {
+        conv.unread_count = 0;
+        renderLeadList();
+      }
+    } catch (e) {}
+  }, 1500);
 }
 
 /* ============================================================
@@ -459,9 +494,10 @@ async function fetchActivities(leadId) {
     const tasks = typeof tasksResp.data === 'string' ? JSON.parse(tasksResp.data) : (tasksResp.data || []);
     (tasks || []).forEach(t => items.push({
       type: 'task',
+      id: t.id,
       icon: 'fa-check-square',
       title: t.Subject || 'Task',
-      sub: t.Status || '',
+      sub: t.Priority ? `Priority: ${t.Priority}` : (t.Status || ''),
       time: t.Due_Date || t.Created_Time,
       completed: t.Status === 'Completed',
       overdue: t.Due_Date && new Date(t.Due_Date) < new Date() && t.Status !== 'Completed'
@@ -505,18 +541,97 @@ async function fetchActivities(leadId) {
     items.forEach(it => {
       const li = document.createElement('li');
       li.className = 'activity-item' + (it.completed ? ' completed' : '') + (it.overdue ? ' overdue' : '');
-      li.innerHTML = `
-        <div class="activity-icon"><i class="fa-solid ${it.icon}"></i></div>
-        <div class="activity-body">
-          <div class="activity-title">${escapeHtml(it.title)}</div>
-          ${it.sub ? `<div class="activity-sub">${escapeHtml(it.sub)}</div>` : ''}
-          <div class="activity-time">${it.time ? formatRelativeTime(it.time) : ''}</div>
-        </div>
-      `;
+      if (it.type === 'task') {
+        li.dataset.taskId = it.id;
+        const iconClass = 'activity-icon is-task' + (it.completed ? ' checked' : '');
+        li.innerHTML = `
+          <div class="${iconClass}" data-task-id="${escapeHtml(it.id)}" title="${it.completed ? 'Mark as not done' : 'Mark as completed'}">
+            <span class="check-mark">✓</span>
+          </div>
+          <div class="activity-body">
+            <div class="activity-title">${escapeHtml(it.title)}</div>
+            ${it.sub ? `<div class="activity-sub">${escapeHtml(it.sub)}</div>` : ''}
+            <div class="activity-time">${it.time ? formatRelativeTime(it.time) : ''}</div>
+          </div>
+        `;
+      } else {
+        li.innerHTML = `
+          <div class="activity-icon"><i class="fa-solid ${it.icon}"></i></div>
+          <div class="activity-body">
+            <div class="activity-title">${escapeHtml(it.title)}</div>
+            ${it.sub ? `<div class="activity-sub">${escapeHtml(it.sub)}</div>` : ''}
+            <div class="activity-time">${it.time ? formatRelativeTime(it.time) : ''}</div>
+          </div>
+        `;
+      }
       activityListEl.appendChild(li);
+    });
+
+    // Wire up checkbox toggles
+    activityListEl.querySelectorAll('.activity-icon.is-task').forEach(el => {
+      el.addEventListener('click', async () => {
+        const taskId = el.dataset.taskId;
+        const isChecked = el.classList.contains('checked');
+        await toggleTaskCompletion(taskId, !isChecked);
+      });
     });
   } catch (e) {
     console.error('Activities fetch failed', e);
+  }
+}
+
+async function toggleTaskCompletion(taskId, makeCompleted) {
+  try {
+    await ZOHO.CRM.API.updateRecord({
+      Entity: 'Tasks',
+      APIData: {
+        id: taskId,
+        Status: makeCompleted ? 'Completed' : 'Not Started'
+      }
+    });
+    if (activeLeadId) await fetchActivities(activeLeadId);
+  } catch (e) {
+    console.error('toggleTaskCompletion failed', e);
+    alert('Could not update task. See console.');
+  }
+}
+
+async function createTask() {
+  if (!activeLeadId) return;
+  const subject = taskInput.value.trim();
+  if (!subject) {
+    taskInput.focus();
+    return;
+  }
+
+  addTaskBtn.disabled = true;
+  addTaskBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+  try {
+    const apiData = {
+      Subject: subject,
+      Status: 'Not Started',
+      Priority: taskPriority.value || 'Normal',
+      What_Id: activeLeadId,
+      $se_module: 'Leads'
+    };
+    if (taskDueDate.value) apiData.Due_Date = taskDueDate.value;
+
+    await ZOHO.CRM.API.insertRecord({
+      Entity: 'Tasks',
+      APIData: apiData
+    });
+
+    taskInput.value = '';
+    taskDueDate.value = '';
+    taskPriority.value = 'Normal';
+    await fetchActivities(activeLeadId);
+  } catch (e) {
+    console.error('createTask failed', e);
+    alert('Could not create task. See console.');
+  } finally {
+    addTaskBtn.disabled = false;
+    addTaskBtn.innerHTML = '<i class="fa-solid fa-plus"></i> Add task';
   }
 }
 
@@ -585,6 +700,15 @@ addNoteBtn?.addEventListener('click', async () => {
     alert('Could not save note. See console.');
   } finally {
     addNoteBtn.disabled = false;
+  }
+});
+
+addTaskBtn?.addEventListener('click', createTask);
+
+taskInput?.addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    createTask();
   }
 });
 
