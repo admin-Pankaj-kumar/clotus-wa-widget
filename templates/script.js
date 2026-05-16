@@ -1435,8 +1435,7 @@ async function submitTemplate() {
     console.log('[Templates] Step 3: updating Zoho record', zohoRecordId, updateFields);
     const updateResp = await ZOHO.CRM.API.updateRecord({
       Entity: 'Clotus_WA_Templates',
-      RecordID: zohoRecordId,
-      APIData: updateFields,
+      APIData: { ...updateFields, id: zohoRecordId },
       Trigger: ['workflow']
     });
     console.log('[Templates] Update response:', updateResp);
@@ -1460,12 +1459,12 @@ async function submitTemplate() {
     console.warn('[Templates] Retrying update with minimal fields only...');
     try {
       const minimalUpdate = {
-        Status: isSuccess ? 'Pending' : 'Draft'
+        Status: isSuccess ? 'Pending' : 'Draft',
+        id: zohoRecordId
       };
       console.log('[Templates] Retry payload:', minimalUpdate);
       const retryResp = await ZOHO.CRM.API.updateRecord({
         Entity: 'Clotus_WA_Templates',
-        RecordID: zohoRecordId,
         APIData: minimalUpdate
       });
       console.log('[Templates] Retry response:', retryResp);
