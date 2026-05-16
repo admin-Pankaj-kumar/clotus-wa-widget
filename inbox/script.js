@@ -78,9 +78,22 @@ let allConversations = []; // lead summaries from server
 let activeLeadId = null;
 let activeLeadData = null; // mimics PageLoad `data`
 
+// Race protection: bump on every selectLead. Any in-flight loadAllMessages
+// with an older generation aborts before mutating the DOM.
+let loadGenerationId = 0;
+
+// Notification ping state (persisted to localStorage)
+let notificationsMuted = false;
+try {
+  notificationsMuted = localStorage.getItem('clotus_wa_notif_muted') === '1';
+} catch (e) {}
+
+// Tracks last-seen newest-message timestamp per lead, so we only ping for genuinely new ones
+const lastSeenTsByLead = new Map();
+
 // Chat state (reused from v3 widget)
 let listofdata = '';
-let tabSelcted = 'templates';
+let tabSelcted = 'reply';  // changed default to reply so user can type immediately
 let timerInterval;
 let listTimer;
 let lastRenderedTime = null;
@@ -97,6 +110,7 @@ let lastViewedAt = null;
 let unreadCount = 0;
 let threadSearchMatches = [];
 let threadSearchActiveIdx = -1;
+let userIsScrolledUp = false; // tracks if user manually scrolled away from bottom
 
 const fileLoader = `<div class="file-loader file-message-container"><div class="file-loader-section"><div class="spinner"></div></div></div>`;
 
@@ -327,8 +341,112 @@ function getUnreadCount(conv) {
 
 async function refreshConversations() {
   const list = await fetchConversations();
+  detectAndAnnounceNewMessages(list);
   allConversations = list;
   renderLeadList();
+}
+
+/**
+ * Compares the new fetched list against lastSeenTsByLead.
+ * If any lead has a newer Incomming message than we've seen before,
+ * play a notification ping (unless muted) and show a toast.
+ */
+function detectAndAnnounceNewMessages(newList) {
+  // First call: just record current state, don't ping for everything
+  const isFirstCall = lastSeenTsByLead.size === 0;
+  const newlyArrived = []; // {leadName, leadId, ts}
+
+  for (const conv of newList) {
+    const inboundTimes = conv.inbound_times || [];
+    if (inboundTimes.length === 0) continue;
+    const newest = Math.max(...inboundTimes);
+    const seen = lastSeenTsByLead.get(conv.lead_id) || 0;
+
+    if (newest > seen) {
+      // Only treat as "new" if not the first call and the message isn't ours-just-sent
+      if (!isFirstCall && conv.lead_id !== activeLeadId) {
+        newlyArrived.push({
+          leadName: conv.lead_name,
+          leadId: conv.lead_id,
+          preview: conv.last_preview
+        });
+      }
+      lastSeenTsByLead.set(conv.lead_id, newest);
+    }
+  }
+
+  if (newlyArrived.length > 0) {
+    playNotificationPing();
+    showNewMessageToast(newlyArrived);
+  }
+}
+
+/* Audio ping — small generated beep, no external file needed */
+let audioCtx = null;
+function playNotificationPing() {
+  if (notificationsMuted) return;
+  try {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    // Resume if suspended (browsers require user interaction first)
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    const now = audioCtx.currentTime;
+    // Two-tone ting: high → slightly higher
+    const playTone = (freq, startOffset, duration) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0, now + startOffset);
+      gain.gain.linearRampToValueAtTime(0.12, now + startOffset + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + startOffset + duration);
+      osc.start(now + startOffset);
+      osc.stop(now + startOffset + duration);
+    };
+    playTone(880, 0, 0.18);
+    playTone(1320, 0.10, 0.20);
+  } catch (e) {
+    console.warn('Notification ping failed:', e);
+  }
+}
+
+function showNewMessageToast(items) {
+  const toast = document.createElement('div');
+  toast.className = 'msg-toast';
+  const count = items.length;
+  const firstName = items[0].leadName || 'Lead';
+  const msgText = count === 1
+    ? `New message from <strong>${escapeHtml(firstName)}</strong>`
+    : `<strong>${count}</strong> new messages (incl. ${escapeHtml(firstName)})`;
+  toast.innerHTML = `
+    <i class="fa-solid fa-message"></i>
+    <span class="msg-toast-body">${msgText}</span>
+    <button class="msg-toast-close" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+  `;
+  document.body.appendChild(toast);
+
+  // Click toast (except close button) → open that lead
+  toast.addEventListener('click', (e) => {
+    if (e.target.closest('.msg-toast-close')) return;
+    if (items.length === 1) {
+      selectLead(items[0].leadId);
+    }
+    toast.remove();
+  });
+  toast.querySelector('.msg-toast-close')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toast.remove();
+  });
+
+  // Auto-dismiss after 6s
+  setTimeout(() => {
+    toast.classList.add('msg-toast-fadeout');
+    setTimeout(() => toast.remove(), 300);
+  }, 6000);
 }
 
 /* ============================================================
@@ -350,7 +468,32 @@ leadSearchInput?.addEventListener('input', e => {
 
 globalRefreshBtn?.addEventListener('click', () => {
   refreshConversations();
-  if (activeLeadId) loadAllMessages(activeLeadData);
+  if (activeLeadId) loadAllMessages(activeLeadData, loadGenerationId);
+});
+
+const muteToggleBtn = document.getElementById('muteToggle');
+const muteIconEl = document.getElementById('muteIcon');
+
+function applyMuteState() {
+  if (!muteIconEl || !muteToggleBtn) return;
+  if (notificationsMuted) {
+    muteIconEl.className = 'fa-solid fa-bell-slash';
+    muteToggleBtn.title = 'Notification sound muted — click to unmute';
+    muteToggleBtn.classList.add('is-muted');
+  } else {
+    muteIconEl.className = 'fa-solid fa-bell';
+    muteToggleBtn.title = 'Mute notification sound';
+    muteToggleBtn.classList.remove('is-muted');
+  }
+}
+applyMuteState();
+
+muteToggleBtn?.addEventListener('click', () => {
+  notificationsMuted = !notificationsMuted;
+  try { localStorage.setItem('clotus_wa_notif_muted', notificationsMuted ? '1' : '0'); } catch (e) {}
+  applyMuteState();
+  // If unmuting, play a confirm ping so user knows it works
+  if (!notificationsMuted) playNotificationPing();
 });
 
 /* ============================================================
@@ -358,6 +501,18 @@ globalRefreshBtn?.addEventListener('click', () => {
    ============================================================ */
 function selectLead(leadId) {
   if (activeLeadId === leadId) return;
+
+  // CRITICAL: stop polling BEFORE switching, so stale responses are discarded
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+
+  // Bump generation — any in-flight loadAllMessages for the previous lead
+  // will see a mismatch and abort before touching the DOM.
+  loadGenerationId++;
+  const myGeneration = loadGenerationId;
+
   activeLeadId = leadId;
   activeLeadData = { EntityId: leadId };
 
@@ -386,15 +541,18 @@ function selectLead(leadId) {
     if (stored) lastViewedAt = parseInt(stored, 10);
   } catch (e) {}
 
-  // Load everything in parallel
+  // Load everything in parallel — pass generation so stale responses are dropped
   fetchLeadDetails(activeLeadData);
-  loadAllMessages(activeLeadData);
+  loadAllMessages(activeLeadData, myGeneration);
   fetchActivities(leadId);
   fetchNotes(leadId);
 
-  // Restart polling
-  if (timerInterval) clearInterval(timerInterval);
-  timerInterval = setInterval(() => loadAllMessages(activeLeadData), POLL_INTERVAL_MS);
+  // Restart polling — each poll tick checks generation before rendering
+  timerInterval = setInterval(() => {
+    if (loadGenerationId === myGeneration && activeLeadId === leadId) {
+      loadAllMessages(activeLeadData, myGeneration);
+    }
+  }, POLL_INTERVAL_MS);
 
   // Mark this lead's inbound messages as "viewed" — clears it from the Unread filter
   setTimeout(() => {
@@ -403,6 +561,7 @@ function selectLead(leadId) {
       localStorage.setItem(STORAGE_KEY_PREFIX + leadId, String(now));
       lastViewedAt = now;
       // Update the in-memory conversation list so the unread badge clears in the left pane
+
       const conv = allConversations.find(c => c.lead_id === leadId);
       if (conv) {
         conv.unread_count = 0;
@@ -854,7 +1013,7 @@ async function handleFileUpload(event) {
       await sendMessageToBackend(templateData, fileCategory, document_id?.id, time, fileName);
     } catch (err) { console.error('File chain failed', err); }
 
-    timerInterval = setInterval(() => loadAllMessages(listofdata), POLL_INTERVAL_MS);
+    const _gen = loadGenerationId; const _lead = activeLeadId; timerInterval = setInterval(() => { if (loadGenerationId === _gen && activeLeadId === _lead) loadAllMessages(listofdata, _gen); }, POLL_INTERVAL_MS);
     event.target.value = '';
   };
   reader.readAsDataURL(file);
@@ -900,7 +1059,7 @@ async function sendMessage() {
     sendMessageToBackend(templateData, '', '', time);
     userInput.value = '';
   } catch (e) { console.error(e); }
-  timerInterval = setInterval(() => loadAllMessages(listofdata), POLL_INTERVAL_MS);
+  const _gen = loadGenerationId; const _lead = activeLeadId; timerInterval = setInterval(() => { if (loadGenerationId === _gen && activeLeadId === _lead) loadAllMessages(listofdata, _gen); }, POLL_INTERVAL_MS);
 }
 window.sendMessage = sendMessage;
 
@@ -1000,7 +1159,18 @@ function appendMessageFooter(msg, msgTime, dataObj, sender) {
 }
 
 /* Sort + regroup */
-function sortMessages() {
+function isChatNearBottom() {
+  if (!chatBody) return true;
+  const threshold = 80; // px from bottom counts as "at bottom"
+  return chatBody.scrollHeight - chatBody.scrollTop - chatBody.clientHeight < threshold;
+}
+
+function scrollChatToBottom() {
+  if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
+}
+
+function sortMessages(forceScrollBottom) {
+  const wasAtBottom = (forceScrollBottom !== undefined) ? forceScrollBottom : isChatNearBottom();
   const msgs = Array.from(chatBody.querySelectorAll('.user-message, .bot-message'));
   msgs.sort((a, b) => new Date(a.getAttribute('data-date-time')) - new Date(b.getAttribute('data-date-time')));
   chatBody.innerHTML = '';
@@ -1021,7 +1191,8 @@ function sortMessages() {
     chatBody.appendChild(m);
   });
   regroupMessages();
-  chatBody.scrollTop = chatBody.scrollHeight;
+  // Only auto-scroll if user was at bottom; if scrolled up, keep position
+  if (wasAtBottom) scrollChatToBottom();
 }
 
 function regroupMessages() {
@@ -1044,11 +1215,28 @@ function isNewMessage(newMessage, records) {
 }
 
 /* Load messages */
-async function loadAllMessages(data) {
+async function loadAllMessages(data, generationId) {
   if (!data || !data.EntityId) return;
-  const req = { arguments: JSON.stringify({ leadIds: data.EntityId }) };
+
+  // Capture generation at call time (may have been bumped during await)
+  const myGen = (generationId !== undefined) ? generationId : loadGenerationId;
+  const myLeadId = data.EntityId;
+
+  const req = { arguments: JSON.stringify({ leadIds: myLeadId }) };
   try {
     const response = await ZOHO.CRM.FUNCTIONS.execute('allWaCommunications', req);
+
+    // GUARD 1: discard if a newer selectLead has happened during the await
+    if (myGen !== loadGenerationId) {
+      console.debug('[Inbox] Discarding stale response for old generation', myGen, 'vs current', loadGenerationId);
+      return;
+    }
+    // GUARD 2: discard if active lead changed (belt + suspenders)
+    if (activeLeadId !== myLeadId) {
+      console.debug('[Inbox] Discarding stale response — lead changed from', myLeadId, 'to', activeLeadId);
+      return;
+    }
+
     const parsed = typeof response === 'string' ? JSON.parse(response) : response;
     if (parsed?.code !== 'success') return;
     const loadData = JSON.parse(parsed?.details?.output);
@@ -1056,14 +1244,24 @@ async function loadAllMessages(data) {
     Countdown.init(loadData?.replyDateTime ? new Date(loadData.replyDateTime) : null);
     if (fistLoad) fistLoadData = [...sorted];
 
+    // Remember scroll position before any DOM mutation
+    const wasNearBottom = isChatNearBottom();
+
     const promises = [];
+    let anythingNew = false;
+
     for (const item of sorted) {
+      // RE-CHECK guards inside the loop (paranoid — generation could bump mid-loop)
+      if (myGen !== loadGenerationId || activeLeadId !== myLeadId) return;
+
       if (item?.type === 'Outbound') updateMessageTicks(item);
       const known = isNewMessage(item, fistLoadData);
       const shouldRender = (known && fistLoad) || !known;
       if (!shouldRender) continue;
       const mt = new Date(item.date_time).getTime();
       if (lastRenderedTime && mt <= new Date(lastRenderedTime).getTime() && !fistLoad) continue;
+
+      anythingNew = true;
       const text = item?.message?.replaceAll?.('{{1}}', userName) || item?.message;
       const sender = item.type === 'Incomming' ? 'bot' : 'user';
       if (item?.message_type != null && item?.message_type !== 'text' && item?.message_type !== 'template') {
@@ -1071,6 +1269,8 @@ async function loadAllMessages(data) {
           await appendMessage('type-file', sender, item.date_time, 'time-group', null, item);
           try {
             const m = await GetFileFromAisensy(item?.message);
+            // GUARD again after media fetch (slow async)
+            if (myGen !== loadGenerationId || activeLeadId !== myLeadId) return;
             await dispalyFileToChat(m, sender, item.date_time, 'time-group', item);
           } catch (e) { console.error('media', e); }
         })();
@@ -1081,8 +1281,16 @@ async function loadAllMessages(data) {
       lastRenderedTime = item.date_time;
     }
     await Promise.all(promises);
+
+    // FINAL guard before sorting
+    if (myGen !== loadGenerationId || activeLeadId !== myLeadId) return;
+
     fistLoad = false;
-    sortMessages();
+    // Only re-sort if anything new was added — prevents poll-induced flicker
+    if (anythingNew) {
+      sortMessages(wasNearBottom);
+    }
+
     if (!lastViewedAt && data.EntityId) {
       setTimeout(() => {
         lastViewedAt = Date.now();
@@ -1223,7 +1431,7 @@ refreshBtnEl?.addEventListener('click', async () => {
     return;
   }
   refreshBtnEl.style.opacity = '0.5';
-  try { await loadAllMessages(activeLeadData); }
+  try { await loadAllMessages(activeLeadData, loadGenerationId); }
   finally { setTimeout(() => { refreshBtnEl.disabled = false; refreshBtnEl.style.opacity = '1'; }, 600); }
 });
 
@@ -1317,7 +1525,15 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     clearInterval(timerInterval); clearInterval(listTimer);
   } else {
-    if (activeLeadData) timerInterval = setInterval(() => loadAllMessages(activeLeadData), POLL_INTERVAL_MS);
+    if (activeLeadData) {
+      const _gen = loadGenerationId;
+      const _lead = activeLeadId;
+      timerInterval = setInterval(() => {
+        if (loadGenerationId === _gen && activeLeadId === _lead) {
+          loadAllMessages(activeLeadData, _gen);
+        }
+      }, POLL_INTERVAL_MS);
+    }
     listTimer = setInterval(refreshConversations, LIST_REFRESH_MS);
   }
 });
